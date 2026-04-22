@@ -2,26 +2,27 @@
 
 > 透過 3 種 CPU 密集運算，即時對比 **CPU Limited vs Unlimited** 的執行時間差異。
 
-## 📁 專案結構
+## 專案結構
 
 ```
-cpu-bench/
-├── worker/           # CPU 壓測 API (Python Flask)
-│   ├── app.py
-│   └── Dockerfile
-├── dashboard/        # Web UI 儀表板 (Node.js + Socket.IO)
-│   ├── server.js
-│   ├── package.json
-│   ├── Dockerfile
+K8s_cpu-benchmark/
+├── worker/                   # CPU 壓測 API (Python Flask)
+│   ├── app.py                # Flask 應用，提供壓測 endpoints
+│   └── Dockerfile            # python:3.11-slim，port 8080
+├── dashboard/                # Web UI 儀表板
+│   ├── server.py             # Python 標準庫 HTTP server（Dockerfile 實際使用）
+│   ├── index.html            # 對應 server.py 的前端（輪詢 /api/bench）
+│   ├── server.js             # Node.js + Socket.IO 版（備用，未用於 Dockerfile）
+│   ├── package.json          # Node.js 依賴（express, socket.io, node-fetch）
+│   ├── Dockerfile            # python:3.11-slim，port 3000
 │   └── public/
-│       └── index.html
+│       └── index.html        # 對應 server.js 的前端（Socket.IO 版）
 ├── k8s/
-│   └── deploy.yaml   # 通用 K8s manifest
-├── start-minikube.sh # 一鍵啟動腳本（minikube）
+│   └── deploy.yaml           # K8s manifest（namespace, 2 workers, dashboard）
 └── README.md
 ```
 
-## 🔬 為什麼設定 CPU Limit 會讓程式變慢？
+## 為什麼設定 CPU Limit 會讓程式變慢？
 
 Linux CFS (Completely Fair Scheduler) 的 CPU throttle 機制：
 
@@ -40,19 +41,65 @@ CPU Limit = 100m = 0.1 core
 - 節點實際可用 CPU（越多 Unlimited 越快）
 - 工作負載的 CPU 密集程度
 
-## 🚀 快速啟動 (Minikube)
+## 架構說明
 
-```bash
-# 給腳本執行權限
-chmod +x start-minikube.sh
-
-# 一鍵建置並部署
-./start-minikube.sh
+```
+                ┌─────────────────────────────────┐
+                │       Namespace: cpu-bench       │
+                │                                  │
+  Browser ──────┤─→ dashboard :3000 (NodePort 30080)
+                │       │              │           │
+                │       ↓              ↓           │
+                │  worker-limited  worker-unlimited │
+                │  :8080 (100m)    :8080 (no limit)│
+                └─────────────────────────────────┘
 ```
 
-然後打開腳本輸出的 URL，按「Run Benchmark」即可看到差異。
+| 元件 | Image | Port | CPU 設定 |
+|------|-------|------|----------|
+| worker-limited | `quay.io/cooloo9871/cpu-bench-worker:latest` | 8080 | requests=100m, limits=100m |
+| worker-unlimited | `quay.io/cooloo9871/cpu-bench-worker:latest` | 8080 | requests=100m, 無 limits |
+| dashboard | `quay.io/cooloo9871/cpu-bench-dashboard:latest` | 3000 (NodePort 30080) | requests=50m, limits=500m |
 
-## 🚀 手動部署流程
+## Worker API
+
+Worker 同時部署兩個實例（limited / unlimited），各自提供相同 endpoints：
+
+| Method | Path | 說明 |
+|--------|------|------|
+| GET | `/health` | 健康檢查，回傳 pod 名稱 |
+| GET | `/info` | Pod 資訊與 CPU limit 狀態 |
+| GET | `/bench/primes` | 計算 50,000 以內質數 |
+| GET | `/bench/fibonacci` | 遞迴計算 fibonacci(36) |
+| GET | `/bench/matrix` | 200×200 矩陣相乘 |
+| GET | `/bench/all` | 依序執行全部三項，回傳總時間 |
+
+## Dashboard 實作說明
+
+Dashboard 有兩個 server 實作，目前 **Dockerfile 使用 Python 版**：
+
+| 檔案 | 前端 | 通訊方式 |
+|------|------|----------|
+| `server.py` + `index.html` | 輪詢 REST | `GET /api/bench`，兩 worker 並行取結果 |
+| `server.js` + `public/index.html` | Socket.IO | 事件驅動，`run_benchmark` / `benchmark_result` |
+
+## 快速部署 (Minikube)
+
+```bash
+# 1. 啟動 minikube（若尚未啟動）
+minikube start
+
+# 2. 套用 manifest
+kubectl apply -f k8s/deploy.yaml
+
+# 3. 確認 Pods 就緒
+kubectl get pods -n cpu-bench
+
+# 4. 開啟儀表板
+minikube service dashboard -n cpu-bench
+```
+
+## 手動部署流程
 
 ### 1. Build Docker 映像檔
 
@@ -68,7 +115,7 @@ docker push YOUR_REGISTRY/cpu-bench-dashboard:latest
 
 ### 2. 修改 deploy.yaml
 
-將所有 `ghcr.io/YOUR_ORG/` 替換成你的 Registry 路徑。
+將所有 `quay.io/cooloo9871/` 替換成你的 Registry 路徑。
 
 ### 3. 套用 Manifest
 
@@ -90,11 +137,15 @@ kubectl get services -n cpu-bench
 minikube service dashboard -n cpu-bench
 ```
 
-**雲端 K8s (GKE/EKS/AKS):**
+**雲端 K8s (GKE/EKS/AKS) — NodePort:**
 ```bash
-# 取得 NodePort
-kubectl get svc dashboard -n cpu-bench
-# 或改 Service type 為 LoadBalancer
+# NodePort 固定為 30080
+kubectl get nodes -o wide   # 取得 Node IP
+# 瀏覽器開啟 http://<NODE_IP>:30080
+```
+
+**改為 LoadBalancer:**
+```bash
 kubectl patch svc dashboard -n cpu-bench -p '{"spec":{"type":"LoadBalancer"}}'
 kubectl get svc dashboard -n cpu-bench  # 等待 EXTERNAL-IP
 ```
@@ -105,7 +156,7 @@ kubectl port-forward svc/dashboard 3000:3000 -n cpu-bench
 # 開啟 http://localhost:3000
 ```
 
-## 📊 壓測項目說明
+## 壓測項目說明
 
 | 任務 | 內容 | CPU 特性 |
 |------|------|----------|
@@ -113,7 +164,7 @@ kubectl port-forward svc/dashboard 3000:3000 -n cpu-bench
 | **費氏數列** | 遞迴計算 fibonacci(36) | 指數級呼叫堆疊，瞬間大量 CPU |
 | **矩陣乘法** | 200×200 矩陣相乘 | 密集浮點數運算 |
 
-## 🔧 調整 CPU Limit
+## 調整 CPU Limit
 
 修改 `k8s/deploy.yaml` 中 `worker-limited` 的 limit：
 
@@ -129,7 +180,7 @@ kubectl apply -f k8s/deploy.yaml
 kubectl rollout restart deployment/worker-limited -n cpu-bench
 ```
 
-## 📈 觀察 CPU Throttle 指標
+## 觀察 CPU Throttle 指標
 
 ```bash
 # 安裝 metrics-server（如果還沒有）
@@ -142,13 +193,13 @@ kubectl top pods -n cpu-bench --sort-by=cpu
 kubectl describe pod -l app=worker-limited -n cpu-bench
 ```
 
-## 🧹 清除所有資源
+## 清除所有資源
 
 ```bash
 kubectl delete namespace cpu-bench
 ```
 
-## 💡 預期結果
+## 預期結果
 
 在典型的 4-core 節點上，Limited (100m) vs Unlimited 的差異：
 
