@@ -17,7 +17,7 @@
   body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.06) 2px,rgba(0,0,0,.06) 4px);pointer-events:none;z-index:100}
 
   /* HEADER */
-  header{border-bottom:1px solid var(--border);padding:30px 80px;display:flex;align-items:center;justify-content:space-between;background:var(--surface)}
+  header{border-bottom:1px solid var(--border);padding:36px 100px;display:flex;align-items:center;justify-content:space-between;background:var(--surface)}
   .logo{display:flex;align-items:center;gap:24px}
   .logo-icon{width:68px;height:68px;background:linear-gradient(135deg,var(--accent),#ff6b35);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:36px}
   .logo h1{font-size:32px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
@@ -27,7 +27,7 @@
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
   /* MAIN */
-  main{max-width:1700px;margin:0 auto;padding:48px 80px}
+  main{max-width:2100px;margin:0 auto;padding:56px 100px}
 
   /* RUN ROW */
   .run-row{display:flex;align-items:center;gap:28px;margin-bottom:40px}
@@ -70,7 +70,7 @@
   .sec-title::after{content:'';flex:1;height:1px;background:var(--border)}
 
   /* COMPARISON BARS */
-  .cmp-grid{display:grid;grid-template-columns:180px 1fr 1fr 240px;gap:22px;align-items:center;margin-bottom:20px}
+  .cmp-grid{display:grid;grid-template-columns:200px 1fr 1fr 270px;gap:22px;align-items:center;margin-bottom:20px}
   .cmp-label{font-family:var(--mono);font-size:17px;color:var(--muted);text-transform:uppercase;text-align:right;font-weight:600}
   .bar-track{height:50px;background:var(--surface2);border-radius:10px;overflow:hidden;border:1px solid var(--border)}
   .bar-fill{height:100%;border-radius:9px;display:flex;align-items:center;padding-left:16px;font-family:var(--mono);font-size:18px;font-weight:600;transition:width .8s cubic-bezier(.4,0,.2,1);white-space:nowrap}
@@ -210,10 +210,10 @@
           <div class="badge" id="tl-badge">讀取中...</div>
         </div>
         <div class="metrics">
-          <div class="metric"><div class="m-label">1 個 Process</div><div class="m-value ph" id="tl1">—</div><div class="m-unit">毫秒</div></div>
-          <div class="metric"><div class="m-label">4 個 Process</div><div class="m-value ph" id="tl4">—</div><div class="m-unit">毫秒</div></div>
+          <div class="metric"><div class="m-label">1 個 Process</div><div class="m-value ph" id="tl1" style="font-size:34px">—</div><div class="m-unit">毫秒</div></div>
+          <div class="metric"><div class="m-label">4 個 Process</div><div class="m-value ph" id="tl4" style="font-size:34px">—</div><div class="m-unit">毫秒</div></div>
+          <div class="metric"><div class="m-label">並行效益</div><div class="m-value ph" id="tls" style="font-size:28px;white-space:nowrap">—</div><div class="m-unit">&nbsp;</div></div>
         </div>
-        <div class="total-row" style="margin-top:12px"><div class="t-label">並行效益</div><div class="m-value ph" id="tls" style="font-size:36px;color:inherit">—</div></div>
       </div>
       <div class="card unlim">
         <div class="card-hd">
@@ -221,10 +221,10 @@
           <div class="badge" id="tu-badge">讀取中...</div>
         </div>
         <div class="metrics">
-          <div class="metric"><div class="m-label">1 個 Process</div><div class="m-value ph" id="tu1">—</div><div class="m-unit">毫秒</div></div>
-          <div class="metric"><div class="m-label">4 個 Process</div><div class="m-value ph" id="tu4">—</div><div class="m-unit">毫秒</div></div>
+          <div class="metric"><div class="m-label">1 個 Process</div><div class="m-value ph" id="tu1" style="font-size:34px">—</div><div class="m-unit">毫秒</div></div>
+          <div class="metric"><div class="m-label">4 個 Process</div><div class="m-value ph" id="tu4" style="font-size:34px">—</div><div class="m-unit">毫秒</div></div>
+          <div class="metric"><div class="m-label">並行效益</div><div class="m-value ph" id="tus" style="font-size:28px;white-space:nowrap">—</div><div class="m-unit">&nbsp;</div></div>
         </div>
-        <div class="total-row" style="margin-top:12px"><div class="t-label">並行效益</div><div class="m-value ph" id="tus" style="font-size:36px;color:inherit">—</div></div>
       </div>
     </div>
     <div id="threadInsight" style="display:none;padding:14px 18px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:13px;line-height:1.9;color:var(--muted)"></div>
@@ -391,7 +391,7 @@ async function runBench(){
     document.getElementById('uf').textContent=ub.fibonacci.elapsed_ms;
     document.getElementById('um').textContent=ub.matrix.elapsed_ms;
     document.getElementById('ut').textContent=U.total_elapsed_ms;
-    document.querySelectorAll('.ph').forEach(e=>e.classList.remove('ph'));
+    ['lp','lf','lm','lt','up','uf','um','ut'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('ph');});
     setBar('blp','bup','sp',lb.primes.elapsed_ms,ub.primes.elapsed_ms);
     setBar('blf','buf','sf',lb.fibonacci.elapsed_ms,ub.fibonacci.elapsed_ms);
     setBar('blm','bum','sm',lb.matrix.elapsed_ms,ub.matrix.elapsed_ms);

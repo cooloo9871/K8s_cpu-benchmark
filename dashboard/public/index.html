@@ -51,7 +51,7 @@
 
   header {
     border-bottom: 1px solid var(--border);
-    padding: 26px 72px;
+    padding: 36px 100px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -113,9 +113,9 @@
   }
 
   main {
-    max-width: 1700px;
+    max-width: 2100px;
     margin: 0 auto;
-    padding: 44px 72px;
+    padding: 56px 100px;
   }
 
   /* Run Button */
@@ -364,7 +364,7 @@
 
   .compare-row {
     display: grid;
-    grid-template-columns: 140px 1fr 1fr 100px;
+    grid-template-columns: 170px 1fr 1fr 200px;
     gap: 16px;
     align-items: center;
     margin-bottom: 14px;
@@ -664,10 +664,10 @@
           <div class="card-badge" id="tl-badge">讀取中...</div>
         </div>
         <div class="metrics">
-          <div class="metric"><div class="metric-label">1 個 Process</div><div class="metric-value metric-placeholder" id="lim-t1">—</div><div class="metric-unit">毫秒</div></div>
-          <div class="metric"><div class="metric-label">4 個 Process</div><div class="metric-value metric-placeholder" id="lim-t4">—</div><div class="metric-unit">毫秒</div></div>
+          <div class="metric"><div class="metric-label">1 個 Process</div><div class="metric-value metric-placeholder" id="lim-t1" style="font-size:34px">—</div><div class="metric-unit">毫秒</div></div>
+          <div class="metric"><div class="metric-label">4 個 Process</div><div class="metric-value metric-placeholder" id="lim-t4" style="font-size:34px">—</div><div class="metric-unit">毫秒</div></div>
+          <div class="metric"><div class="metric-label">並行效益</div><div class="metric-value metric-placeholder" id="lim-ts" style="font-size:28px;white-space:nowrap">—</div><div class="metric-unit">&nbsp;</div></div>
         </div>
-        <div class="total-metric" style="margin-top:12px"><div class="total-label">並行效益</div><div class="metric-value metric-placeholder" id="lim-ts" style="font-size:36px">—</div></div>
       </div>
       <div class="card unlimited">
         <div class="card-header">
@@ -678,10 +678,10 @@
           <div class="card-badge" id="tu-badge">讀取中...</div>
         </div>
         <div class="metrics">
-          <div class="metric"><div class="metric-label">1 個 Process</div><div class="metric-value metric-placeholder" id="unlim-t1">—</div><div class="metric-unit">毫秒</div></div>
-          <div class="metric"><div class="metric-label">4 個 Process</div><div class="metric-value metric-placeholder" id="unlim-t4">—</div><div class="metric-unit">毫秒</div></div>
+          <div class="metric"><div class="metric-label">1 個 Process</div><div class="metric-value metric-placeholder" id="unlim-t1" style="font-size:34px">—</div><div class="metric-unit">毫秒</div></div>
+          <div class="metric"><div class="metric-label">4 個 Process</div><div class="metric-value metric-placeholder" id="unlim-t4" style="font-size:34px">—</div><div class="metric-unit">毫秒</div></div>
+          <div class="metric"><div class="metric-label">並行效益</div><div class="metric-value metric-placeholder" id="unlim-ts" style="font-size:28px;white-space:nowrap">—</div><div class="metric-unit">&nbsp;</div></div>
         </div>
-        <div class="total-metric" style="margin-top:12px"><div class="total-label">並行效益</div><div class="metric-value metric-placeholder" id="unlim-ts" style="font-size:36px">—</div></div>
       </div>
     </div>
     <div id="thread-insight" style="display:none;padding:14px 18px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;font-family:var(--mono);font-size:18px;line-height:1.9;color:var(--muted)"></div>
