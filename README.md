@@ -89,12 +89,12 @@ Dashboard 有兩個 server 實作，目前 **Dockerfile 使用 Python 版**：
 
 ```bash
 # Worker
-docker build -t YOUR_REGISTRY/cpu-bench-worker:latest ./worker
-docker push YOUR_REGISTRY/cpu-bench-worker:latest
+podman build -t YOUR_REGISTRY/cpu-bench-worker:latest ./worker
+podman push YOUR_REGISTRY/cpu-bench-worker:latest
 
 # Dashboard
-docker build -t YOUR_REGISTRY/cpu-bench-dashboard:latest ./dashboard
-docker push YOUR_REGISTRY/cpu-bench-dashboard:latest
+podamn build -t YOUR_REGISTRY/cpu-bench-dashboard:latest ./dashboard
+podman push YOUR_REGISTRY/cpu-bench-dashboard:latest
 ```
 
 ### 2. 修改 deploy.yaml
