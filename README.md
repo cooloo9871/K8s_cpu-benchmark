@@ -196,7 +196,7 @@ kubectl describe pod -l app=worker-limited -n cpu-bench
 ## 清除所有資源
 
 ```bash
-kubectl delete namespace cpu-bench
+kubectl delete -f k8s/deploy.yaml
 ```
 
 ## 預期結果
