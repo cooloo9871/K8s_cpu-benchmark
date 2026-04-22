@@ -12,6 +12,16 @@ const WORKER_UNLIMITED_URL = process.env.WORKER_UNLIMITED_URL || 'http://worker-
 
 app.use(express.static('public'));
 
+async function fetchEndpoint(url, path, label) {
+  try {
+    const res = await fetch(`${url}${path}`, { timeout: 10000 });
+    const data = await res.json();
+    return { ...data, label, error: null };
+  } catch (e) {
+    return { label, error: e.message };
+  }
+}
+
 async function runBench(url, label) {
   try {
     const start = Date.now();
@@ -23,8 +33,26 @@ async function runBench(url, label) {
   }
 }
 
+async function runThreadBenchWorker(url, label) {
+  try {
+    const res = await fetch(`${url}/bench/threads`, { timeout: 120000 });
+    const data = await res.json();
+    return { ...data, label, error: null };
+  } catch (e) {
+    return { label, error: e.message };
+  }
+}
+
 io.on('connection', (socket) => {
   console.log('Dashboard client connected');
+
+  socket.on('get_worker_info', async () => {
+    const [limited, unlimited] = await Promise.all([
+      fetchEndpoint(WORKER_LIMITED_URL, '/info', 'CPU Limited'),
+      fetchEndpoint(WORKER_UNLIMITED_URL, '/info', 'CPU Unlimited'),
+    ]);
+    socket.emit('worker_info', { limited, unlimited });
+  });
 
   socket.on('run_benchmark', async () => {
     socket.emit('benchmark_start', { timestamp: new Date().toISOString() });
@@ -35,6 +63,15 @@ io.on('connection', (socket) => {
     ]);
 
     socket.emit('benchmark_result', { limited, unlimited, timestamp: new Date().toISOString() });
+  });
+
+  socket.on('run_thread_benchmark', async () => {
+    socket.emit('benchmark_start', { timestamp: new Date().toISOString() });
+    const [limited, unlimited] = await Promise.all([
+      runThreadBenchWorker(WORKER_LIMITED_URL, 'CPU Limited (100m)'),
+      runThreadBenchWorker(WORKER_UNLIMITED_URL, 'CPU Unlimited'),
+    ]);
+    socket.emit('thread_benchmark_result', { limited, unlimited, timestamp: new Date().toISOString() });
   });
 
   socket.on('disconnect', () => {

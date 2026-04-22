@@ -28,12 +28,42 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path == "/api/bench":
+        if self.path == "/api/worker_info":
+            results = {}
+            def run_info(url, key, label):
+                try:
+                    with urllib.request.urlopen(f"{url}/info", timeout=10) as r:
+                        data = json.loads(r.read())
+                        data["label"] = label
+                        results[key] = data
+                except Exception as e:
+                    results[key] = {"label": label, "error": str(e)}
+            t1 = threading.Thread(target=run_info, args=(LIMITED_URL,   "limited",   "CPU Limited"))
+            t2 = threading.Thread(target=run_info, args=(UNLIMITED_URL, "unlimited", "CPU Unlimited"))
+            t1.start(); t2.start()
+            t1.join();  t2.join()
+            self.send_json(200, results)
+        elif self.path == "/api/bench":
             results = {}
             def run(url, key, label):
                 results[key] = fetch_bench(url, label)
             t1 = threading.Thread(target=run, args=(LIMITED_URL,   "limited",   "CPU Limited (100m)"))
             t2 = threading.Thread(target=run, args=(UNLIMITED_URL, "unlimited", "CPU Unlimited"))
+            t1.start(); t2.start()
+            t1.join();  t2.join()
+            self.send_json(200, results)
+        elif self.path == "/api/thread_bench":
+            results = {}
+            def run_thread(url, key, label):
+                try:
+                    with urllib.request.urlopen(f"{url}/bench/threads", timeout=120) as r:
+                        data = json.loads(r.read())
+                        data["label"] = label
+                        results[key] = data
+                except Exception as e:
+                    results[key] = {"label": label, "error": str(e)}
+            t1 = threading.Thread(target=run_thread, args=(LIMITED_URL,   "limited",   "CPU Limited (100m)"))
+            t2 = threading.Thread(target=run_thread, args=(UNLIMITED_URL, "unlimited", "CPU Unlimited"))
             t1.start(); t2.start()
             t1.join();  t2.join()
             self.send_json(200, results)

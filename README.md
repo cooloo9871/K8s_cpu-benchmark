@@ -73,6 +73,7 @@ Worker 同時部署兩個實例（limited / unlimited），各自提供相同 en
 | GET | `/bench/fibonacci` | 遞迴計算 fibonacci(36) |
 | GET | `/bench/matrix` | 200×200 矩陣相乘 |
 | GET | `/bench/all` | 依序執行全部三項，回傳總時間 |
+| GET | `/bench/threads` | 1 process vs 4 processes 並行質數計算（500,000），回傳加速比 |
 
 ## Dashboard 實作說明
 
@@ -128,6 +129,18 @@ kubectl port-forward --address <your ip address> svc/dashboard 3000:3000 -n cpu-
 | **質數計算**（Dashboard：Primes） | 計算 50,000 以內的質數 | 持續迴圈運算，最能展示 throttle |
 | **費氏數列**（Dashboard：Fibonacci） | 遞迴計算 fibonacci(36) | 指數級呼叫堆疊，瞬間大量 CPU |
 | **矩陣乘法**（Dashboard：Matrix） | 200×200 矩陣相乘 | 密集浮點數運算 |
+| **多執行緒比較**（Dashboard：Thread Benchmark） | 質數計算 500,000（1 process vs 4 processes） | 展示 CPU throttle 如何吃掉多核並行優勢 |
+
+### 多執行緒測試說明
+
+使用 Python `ProcessPoolExecutor` 將 500,000 以內的質數計算分成 4 份並行執行，對比單一 process 的執行時間：
+
+| 場景 | 1 Process | 4 Processes | 加速比 | 原因 |
+|------|-----------|-------------|--------|------|
+| CPU Unlimited | ~Xms | ~X/4ms | ~4x | 4 core 真正並行 |
+| CPU Limited (100m) | ~Xms | ~Xms | ~1x | throttle 吃掉所有並行優勢 |
+
+> **結論**：CPU limit 下，多執行緒是無效的。應用程式擴展執行緒數不會帶來任何效能提升，因為容器的 CPU 時間預算是固定的。
 
 ## 調整 CPU Limit
 

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -30,6 +30,7 @@
     font-family: var(--sans);
     min-height: 100vh;
     overflow-x: hidden;
+    font-size: 23px;
   }
 
   /* Scanline overlay */
@@ -50,7 +51,7 @@
 
   header {
     border-bottom: 1px solid var(--border);
-    padding: 20px 40px;
+    padding: 26px 72px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -75,7 +76,7 @@
   }
 
   .logo-text h1 {
-    font-size: 18px;
+    font-size: 32px;
     font-weight: 800;
     letter-spacing: 0.05em;
     text-transform: uppercase;
@@ -83,7 +84,7 @@
 
   .logo-text span {
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: 17px;
     color: var(--muted);
     letter-spacing: 0.15em;
   }
@@ -93,7 +94,7 @@
     align-items: center;
     gap: 8px;
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: 16px;
     color: var(--muted);
   }
 
@@ -112,9 +113,9 @@
   }
 
   main {
-    max-width: 1400px;
+    max-width: 1700px;
     margin: 0 auto;
-    padding: 32px 40px;
+    padding: 44px 72px;
   }
 
   /* Run Button */
@@ -127,7 +128,7 @@
 
   .run-btn {
     font-family: var(--mono);
-    font-size: 14px;
+    font-size: 17px;
     font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -159,7 +160,7 @@
 
   .run-count {
     font-family: var(--mono);
-    font-size: 13px;
+    font-size: 17px;
     color: var(--muted);
   }
 
@@ -174,7 +175,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: 17px;
     font-weight: 600;
   }
 
@@ -195,8 +196,8 @@
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 24px;
+    border-radius: 14px;
+    padding: 40px;
     position: relative;
     overflow: hidden;
   }
@@ -221,7 +222,7 @@
   }
 
   .card-title {
-    font-size: 11px;
+    font-size: 16px;
     font-weight: 600;
     letter-spacing: 0.15em;
     text-transform: uppercase;
@@ -230,7 +231,7 @@
   }
 
   .card-label {
-    font-size: 20px;
+    font-size: 40px;
     font-weight: 800;
   }
 
@@ -239,7 +240,7 @@
 
   .card-badge {
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 17px;
     padding: 4px 10px;
     border-radius: 20px;
     background: var(--surface2);
@@ -265,7 +266,7 @@
 
   .metric-label {
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 17px;
     color: var(--muted);
     letter-spacing: 0.1em;
     margin-bottom: 6px;
@@ -274,13 +275,13 @@
 
   .metric-value {
     font-family: var(--mono);
-    font-size: 22px;
+    font-size: 46px;
     font-weight: 400;
     line-height: 1;
   }
 
   .metric-unit {
-    font-size: 11px;
+    font-size: 15px;
     color: var(--muted);
     margin-top: 2px;
   }
@@ -304,7 +305,7 @@
 
   .total-label {
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: 17px;
     color: var(--muted);
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -312,7 +313,7 @@
 
   .total-value {
     font-family: var(--mono);
-    font-size: 32px;
+    font-size: 70px;
     font-weight: 400;
   }
 
@@ -329,7 +330,7 @@
   }
 
   .section-title {
-    font-size: 11px;
+    font-size: 17px;
     font-weight: 600;
     letter-spacing: 0.15em;
     text-transform: uppercase;
@@ -349,7 +350,7 @@
 
   .chart-container {
     position: relative;
-    height: 280px;
+    height: 380px;
   }
 
   /* Comparison bar */
@@ -371,14 +372,14 @@
 
   .compare-label {
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: 17px;
     color: var(--muted);
     text-transform: uppercase;
     text-align: right;
   }
 
   .bar-track {
-    height: 28px;
+    height: 50px;
     background: var(--surface2);
     border-radius: 4px;
     overflow: hidden;
@@ -393,7 +394,7 @@
     align-items: center;
     padding-left: 10px;
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: 18px;
     font-weight: 600;
     transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
     white-space: nowrap;
@@ -404,7 +405,7 @@
 
   .speedup-badge {
     font-family: var(--mono);
-    font-size: 13px;
+    font-size: 20px;
     font-weight: 600;
     text-align: center;
   }
@@ -424,7 +425,7 @@
 
   .log-entry {
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: 18px;
     color: var(--muted);
     padding: 5px 0;
     border-bottom: 1px solid var(--border);
@@ -471,7 +472,7 @@
 
   .loading-text {
     font-family: var(--mono);
-    font-size: 14px;
+    font-size: 24px;
     color: var(--accent);
     letter-spacing: 0.1em;
     animation: blink 1s ease-in-out infinite;
@@ -480,7 +481,7 @@
   @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
   .loading-sub {
-    font-size: 12px;
+    font-size: 20px;
     color: var(--muted);
     margin-top: 8px;
   }
@@ -492,8 +493,8 @@
   <div class="logo-area">
     <div class="logo-icon">⚙️</div>
     <div class="logo-text">
-      <h1>CPU Throttle Benchmark</h1>
-      <span>KUBERNETES · CPU LIMIT PERFORMANCE ANALYSIS</span>
+      <h1>CPU Throttle 效能測試</h1>
+      <span>KUBERNETES · CPU 限制效能分析</span>
     </div>
   </div>
   <div class="header-status">
@@ -504,8 +505,8 @@
 
 <main>
   <div class="run-section">
-    <button class="run-btn" id="run-btn" onclick="runBenchmark()">▶ Run Benchmark</button>
-    <span class="run-count" id="run-count">Run #0</span>
+    <button class="run-btn" id="run-btn" onclick="runBenchmark()">▶ 執行壓測</button>
+    <span class="run-count" id="run-count">第 0 次</span>
     <div class="legend">
       <div class="legend-item">
         <div class="legend-dot" style="background:var(--limited)"></div>
@@ -526,30 +527,30 @@
           <div class="card-title" id="lim-pod">Pod A</div>
           <div class="card-label">CPU Limited</div>
         </div>
-        <div class="card-badge">limits.cpu: 100m</div>
+        <div class="card-badge" id="lim-badge">讀取中...</div>
       </div>
       <div class="metrics">
         <div class="metric">
-          <div class="metric-label">Primes</div>
+          <div class="metric-label">質數計算</div>
           <div class="metric-value metric-placeholder" id="lim-primes">—</div>
-          <div class="metric-unit">ms</div>
+          <div class="metric-unit">毫秒</div>
         </div>
         <div class="metric">
-          <div class="metric-label">Fibonacci</div>
+          <div class="metric-label">費氏數列</div>
           <div class="metric-value metric-placeholder" id="lim-fib">—</div>
-          <div class="metric-unit">ms</div>
+          <div class="metric-unit">毫秒</div>
         </div>
         <div class="metric">
-          <div class="metric-label">Matrix</div>
+          <div class="metric-label">矩陣乘法</div>
           <div class="metric-value metric-placeholder" id="lim-matrix">—</div>
-          <div class="metric-unit">ms</div>
+          <div class="metric-unit">毫秒</div>
         </div>
       </div>
       <div class="total-metric">
-        <div class="total-label">Total Elapsed</div>
+        <div class="total-label">總執行時間</div>
         <div>
           <div class="total-value" id="lim-total">—</div>
-          <div class="metric-unit">milliseconds</div>
+          <div class="metric-unit">毫秒</div>
         </div>
       </div>
     </div>
@@ -560,30 +561,30 @@
           <div class="card-title" id="unlim-pod">Pod B</div>
           <div class="card-label">CPU Unlimited</div>
         </div>
-        <div class="card-badge">No limits set</div>
+        <div class="card-badge" id="unlim-badge">讀取中...</div>
       </div>
       <div class="metrics">
         <div class="metric">
-          <div class="metric-label">Primes</div>
+          <div class="metric-label">質數計算</div>
           <div class="metric-value metric-placeholder" id="unlim-primes">—</div>
-          <div class="metric-unit">ms</div>
+          <div class="metric-unit">毫秒</div>
         </div>
         <div class="metric">
-          <div class="metric-label">Fibonacci</div>
+          <div class="metric-label">費氏數列</div>
           <div class="metric-value metric-placeholder" id="unlim-fib">—</div>
-          <div class="metric-unit">ms</div>
+          <div class="metric-unit">毫秒</div>
         </div>
         <div class="metric">
-          <div class="metric-label">Matrix</div>
+          <div class="metric-label">矩陣乘法</div>
           <div class="metric-value metric-placeholder" id="unlim-matrix">—</div>
-          <div class="metric-unit">ms</div>
+          <div class="metric-unit">毫秒</div>
         </div>
       </div>
       <div class="total-metric">
-        <div class="total-label">Total Elapsed</div>
+        <div class="total-label">總執行時間</div>
         <div>
           <div class="total-value" id="unlim-total">—</div>
-          <div class="metric-unit">milliseconds</div>
+          <div class="metric-unit">毫秒</div>
         </div>
       </div>
     </div>
@@ -591,10 +592,10 @@
 
   <!-- Comparison Bars -->
   <div class="comparison-section">
-    <div class="section-title">Task-by-Task Comparison</div>
+    <div class="section-title">各任務執行時間對比</div>
 
     <div class="compare-row">
-      <div class="compare-label">Primes</div>
+      <div class="compare-label">質數計算</div>
       <div class="bar-track">
         <div class="bar-fill limited" id="bar-lim-primes" style="width:0%">—</div>
       </div>
@@ -605,7 +606,7 @@
     </div>
 
     <div class="compare-row">
-      <div class="compare-label">Fibonacci</div>
+      <div class="compare-label">費氏數列</div>
       <div class="bar-track">
         <div class="bar-fill limited" id="bar-lim-fib" style="width:0%">—</div>
       </div>
@@ -616,7 +617,7 @@
     </div>
 
     <div class="compare-row">
-      <div class="compare-label">Matrix</div>
+      <div class="compare-label">矩陣乘法</div>
       <div class="bar-track">
         <div class="bar-fill limited" id="bar-lim-matrix" style="width:0%">—</div>
       </div>
@@ -627,32 +628,72 @@
     </div>
 
     <div class="compare-row">
-      <div class="compare-label" style="color:var(--text);font-weight:bold">TOTAL</div>
+      <div class="compare-label" style="color:var(--text);font-weight:bold">總計</div>
       <div class="bar-track">
         <div class="bar-fill limited" id="bar-lim-total" style="width:0%">—</div>
       </div>
       <div class="bar-track">
         <div class="bar-fill unlimited" id="bar-unlim-total" style="width:0%">—</div>
       </div>
-      <div class="speedup-badge" id="speedup-total" style="color:var(--accent);font-size:16px">—</div>
+      <div class="speedup-badge" id="speedup-total" style="color:var(--accent);font-size:24px">—</div>
     </div>
   </div>
 
   <!-- Chart -->
   <div class="chart-section">
-    <div class="section-title">Historical Total Time (ms)</div>
+    <div class="section-title">歷史總執行時間（毫秒）</div>
     <div class="chart-container">
       <canvas id="history-chart"></canvas>
     </div>
   </div>
 
+  <!-- Thread Benchmark -->
+  <div class="comparison-section">
+    <div class="section-title">多 Process 效益比較 — 質數計算 500,000 以內（1 個 vs 4 個 Process）</div>
+    <div class="run-section" style="margin-bottom:20px">
+      <button class="run-btn" id="thread-btn" onclick="runThreadBenchmark()">▶ 執行多 Process 壓測</button>
+      <span class="run-count" id="thread-status">尚未執行</span>
+    </div>
+    <div class="cards" style="margin-bottom:16px">
+      <div class="card limited">
+        <div class="card-header">
+          <div>
+            <div class="card-title" id="lim-thread-pod">—</div>
+            <div class="card-label">CPU Limited</div>
+          </div>
+          <div class="card-badge" id="tl-badge">讀取中...</div>
+        </div>
+        <div class="metrics">
+          <div class="metric"><div class="metric-label">1 個 Process</div><div class="metric-value metric-placeholder" id="lim-t1">—</div><div class="metric-unit">毫秒</div></div>
+          <div class="metric"><div class="metric-label">4 個 Process</div><div class="metric-value metric-placeholder" id="lim-t4">—</div><div class="metric-unit">毫秒</div></div>
+          <div class="metric"><div class="metric-label">加速效益</div><div class="metric-value metric-placeholder" id="lim-ts">—</div><div class="metric-unit">倍</div></div>
+        </div>
+      </div>
+      <div class="card unlimited">
+        <div class="card-header">
+          <div>
+            <div class="card-title" id="unlim-thread-pod">—</div>
+            <div class="card-label">CPU Unlimited</div>
+          </div>
+          <div class="card-badge" id="tu-badge">讀取中...</div>
+        </div>
+        <div class="metrics">
+          <div class="metric"><div class="metric-label">1 個 Process</div><div class="metric-value metric-placeholder" id="unlim-t1">—</div><div class="metric-unit">毫秒</div></div>
+          <div class="metric"><div class="metric-label">4 個 Process</div><div class="metric-value metric-placeholder" id="unlim-t4">—</div><div class="metric-unit">ms</div></div>
+          <div class="metric"><div class="metric-label">加速效益</div><div class="metric-value metric-placeholder" id="unlim-ts">—</div><div class="metric-unit">倍</div></div>
+        </div>
+      </div>
+    </div>
+    <div id="thread-insight" style="display:none;padding:14px 18px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;font-family:var(--mono);font-size:18px;line-height:1.9;color:var(--muted)"></div>
+  </div>
+
   <!-- Log -->
   <div class="log-section">
-    <div class="section-title">Run Log</div>
+    <div class="section-title">執行紀錄</div>
     <div class="log-entries" id="log-entries">
       <div class="log-entry">
-        <span class="log-time">READY</span>
-        <span class="log-msg">System online. Click "Run Benchmark" to start comparison.</span>
+        <span class="log-time">就緒</span>
+        <span class="log-msg">系統就緒，點擊「執行壓測」開始測試。</span>
       </div>
     </div>
   </div>
@@ -662,14 +703,31 @@
 <div class="loading-overlay" id="loading">
   <div class="loading-box">
     <div class="loading-spinner"></div>
-    <div class="loading-text">BENCHMARKING...</div>
-    <div class="loading-sub">Running CPU-intensive tasks on both pods</div>
+    <div class="loading-text">測試中...</div>
+    <div class="loading-sub">正在同時對兩個 Pod 執行 CPU 運算</div>
   </div>
 </div>
 
 <script>
 const socket = io();
 let runCount = 0;
+
+function updateBadges(limited, unlimited) {
+  if (limited && !limited.error) {
+    const txt = limited.cpu_limit ? `limits.cpu: ${limited.cpu_limit}` : '未設定 CPU 限制';
+    document.getElementById('lim-badge').textContent = txt;
+    document.getElementById('tl-badge').textContent = txt;
+  }
+  if (unlimited && !unlimited.error) {
+    const txt = unlimited.cpu_limit ? `limits.cpu: ${unlimited.cpu_limit}` : '未設定 CPU 限制';
+    document.getElementById('unlim-badge').textContent = txt;
+    document.getElementById('tu-badge').textContent = txt;
+  }
+}
+
+socket.on('worker_info', (data) => {
+  updateBadges(data.limited, data.unlimited);
+});
 const historyLimited = [];
 const historyUnlimited = [];
 const historyLabels = [];
@@ -722,7 +780,7 @@ const chart = new Chart(ctx, {
 });
 
 function addLog(msg, type = 'info') {
-  const now = new Date().toLocaleTimeString('zh-TW', {hour12: false});
+  const now = new Date().toLocaleTimeString('en-US', {hour12: false});
   const el = document.getElementById('log-entries');
   const entry = document.createElement('div');
   entry.className = 'log-entry';
@@ -730,11 +788,53 @@ function addLog(msg, type = 'info') {
   el.insertBefore(entry, el.firstChild);
 }
 
+function runThreadBenchmark() {
+  const btn = document.getElementById('thread-btn');
+  btn.disabled = true;
+  document.getElementById('thread-status').textContent = '執行中...';
+  document.getElementById('loading').classList.add('active');
+  addLog('多 Process 壓測開始 — 1 個 vs 4 個 Process...');
+  socket.emit('run_thread_benchmark');
+}
+
+socket.on('thread_benchmark_result', (data) => {
+  document.getElementById('loading').classList.remove('active');
+  document.getElementById('thread-btn').disabled = false;
+
+  const { limited, unlimited } = data;
+  if (limited.error || unlimited.error) {
+    addLog(`THREAD ERROR: ${limited.error || unlimited.error}`);
+    document.getElementById('thread-status').textContent = 'Error';
+    return;
+  }
+
+  document.getElementById('lim-thread-pod').textContent = limited.pod_name || '—';
+  document.getElementById('unlim-thread-pod').textContent = unlimited.pod_name || '—';
+  document.getElementById('lim-t1').textContent = limited.single_ms;
+  document.getElementById('lim-t4').textContent = limited.multi_ms;
+  document.getElementById('lim-ts').textContent = limited.speedup;
+  document.getElementById('unlim-t1').textContent = unlimited.single_ms;
+  document.getElementById('unlim-t4').textContent = unlimited.multi_ms;
+  document.getElementById('unlim-ts').textContent = unlimited.speedup;
+  ['lim-t1','lim-t4','lim-ts','unlim-t1','unlim-t4','unlim-ts'].forEach(id =>
+    document.getElementById(id).classList.remove('metric-placeholder'));
+
+  const ins = document.getElementById('thread-insight');
+  ins.style.display = 'block';
+  ins.innerHTML =
+    `● CPU Limited (100m) — 4 個 Process 加速效益：<span style="color:var(--limited)">快了 ${limited.speedup} 倍</span>（CPU throttle 將並行優勢完全抵消）<br>` +
+    `● CPU Unlimited — 4 個 Process 加速效益：<span style="color:var(--unlimited)">快了 ${unlimited.speedup} 倍</span>（可實際利用多核心）<br>` +
+    `● 結論：在 CPU Limited容器中，增加 Process 數無法提升效能，多核心優勢被 throttle 完全抵消。`;
+
+  document.getElementById('thread-status').textContent = '完成';
+  addLog(`多 Process — 受限：1個=${limited.single_ms}ms / 4個=${limited.multi_ms}ms（快了 ${limited.speedup} 倍）| 無限制：1個=${unlimited.single_ms}ms / 4個=${unlimited.multi_ms}ms（快了 ${unlimited.speedup} 倍）`);
+});
+
 function runBenchmark() {
   const btn = document.getElementById('run-btn');
   btn.disabled = true;
   document.getElementById('loading').classList.add('active');
-  addLog('Benchmark started — running primes, fibonacci, matrix on both pods...');
+  addLog('壓測開始 — 正在兩個 Pod 上執行質數計算、費氏數列、矩陣乘法...');
   socket.emit('run_benchmark');
 }
 
@@ -744,7 +844,7 @@ socket.on('benchmark_result', (data) => {
 
   const { limited, unlimited } = data;
   runCount++;
-  document.getElementById('run-count').textContent = `Run #${runCount}`;
+  document.getElementById('run-count').textContent = `第 ${runCount} 次`;
 
   if (limited.error || unlimited.error) {
     addLog(`ERROR: ${limited.error || unlimited.error}`, 'error');
@@ -757,6 +857,7 @@ socket.on('benchmark_result', (data) => {
 
   document.getElementById('lim-pod').textContent = limited.pod_name || 'Pod A';
   document.getElementById('unlim-pod').textContent = unlimited.pod_name || 'Pod B';
+  updateBadges(limited, unlimited);
   document.getElementById('lim-primes').textContent = lb.primes.elapsed_ms;
   document.getElementById('lim-fib').textContent = lb.fibonacci.elapsed_ms;
   document.getElementById('lim-matrix').textContent = lb.matrix.elapsed_ms;
@@ -808,11 +909,12 @@ socket.on('benchmark_result', (data) => {
   chart.update();
 
   const speedup = (limited.total_elapsed_ms / unlimited.total_elapsed_ms).toFixed(2);
-  addLog(`Run #${runCount} complete — Limited: ${limited.total_elapsed_ms}ms | Unlimited: ${unlimited.total_elapsed_ms}ms | Speedup: ${speedup}x`);
+  addLog(`第 ${runCount} 次完成 — 受限：${limited.total_elapsed_ms} 毫秒 | 無限制：${unlimited.total_elapsed_ms} 毫秒 | 受限慢了 ${speedup} 倍`);
 });
 
 socket.on('connect', () => {
   document.getElementById('connection-status').textContent = 'CONNECTED';
+  socket.emit('get_worker_info');
 });
 
 socket.on('disconnect', () => {

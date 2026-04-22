@@ -2,6 +2,7 @@ import os
 import time
 import math
 import threading
+from concurrent.futures import ProcessPoolExecutor
 from flask import Flask, jsonify
 from datetime import datetime
 
@@ -9,6 +10,31 @@ app = Flask(__name__)
 
 POD_NAME = os.environ.get("POD_NAME", "unknown")
 HAS_LIMIT = os.environ.get("HAS_CPU_LIMIT", "false")
+
+def get_cpu_limit_str():
+    # cgroup v2
+    try:
+        with open('/sys/fs/cgroup/cpu.max') as f:
+            quota_str, period_str = f.read().strip().split()
+        if quota_str == 'max':
+            return None
+        millis = round(int(quota_str) / int(period_str) * 1000)
+        return f"{millis}m"
+    except Exception:
+        pass
+    # cgroup v1
+    try:
+        with open('/sys/fs/cgroup/cpu/cpu.cfs_quota_us') as f:
+            quota = int(f.read().strip())
+        if quota == -1:
+            return None
+        with open('/sys/fs/cgroup/cpu/cpu.cfs_period_us') as f:
+            period = int(f.read().strip())
+        millis = round(quota / period * 1000)
+        return f"{millis}m"
+    except Exception:
+        pass
+    return None
 
 def is_prime(n):
     if n < 2:
@@ -36,6 +62,14 @@ def fibonacci(n):
         return n
     return fibonacci(n - 1) + fibonacci(n - 2)
 
+def _count_primes_chunk(args):
+    start, end = args
+    count = 0
+    for n in range(max(2, start), end + 1):
+        if is_prime(n):
+            count += 1
+    return count
+
 def matrix_multiply(size):
     """Matrix multiplication"""
     a = [[float(i * size + j) for j in range(size)] for i in range(size)]
@@ -56,6 +90,7 @@ def info():
     return jsonify({
         "pod_name": POD_NAME,
         "has_cpu_limit": HAS_LIMIT,
+        "cpu_limit": get_cpu_limit_str(),
         "timestamp": datetime.utcnow().isoformat()
     })
 
@@ -141,8 +176,39 @@ def bench_all():
     return jsonify({
         "pod_name": POD_NAME,
         "has_cpu_limit": HAS_LIMIT,
+        "cpu_limit": get_cpu_limit_str(),
         "total_elapsed_ms": round(total_elapsed * 1000, 2),
         "benchmarks": results,
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+@app.route("/bench/threads")
+def bench_threads():
+    limit = 500000
+    workers = 4
+
+    start = time.perf_counter()
+    count_primes(limit)
+    single_ms = round((time.perf_counter() - start) * 1000, 2)
+
+    chunk = limit // workers
+    ranges = [(i * chunk, (i + 1) * chunk - 1 if i < workers - 1 else limit)
+              for i in range(workers)]
+    start = time.perf_counter()
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        list(executor.map(_count_primes_chunk, ranges))
+    multi_ms = round((time.perf_counter() - start) * 1000, 2)
+
+    return jsonify({
+        "task": "thread_compare",
+        "limit": limit,
+        "workers": workers,
+        "single_ms": single_ms,
+        "multi_ms": multi_ms,
+        "speedup": round(single_ms / multi_ms, 2) if multi_ms > 0 else 0,
+        "pod_name": POD_NAME,
+        "has_cpu_limit": HAS_LIMIT,
+        "cpu_limit": get_cpu_limit_str(),
         "timestamp": datetime.utcnow().isoformat()
     })
 
