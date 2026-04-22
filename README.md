@@ -83,23 +83,7 @@ Dashboard 有兩個 server 實作，目前 **Dockerfile 使用 Python 版**：
 | `server.py` + `index.html` | 輪詢 REST | `GET /api/bench`，兩 worker 並行取結果 |
 | `server.js` + `public/index.html` | Socket.IO | 事件驅動，`run_benchmark` / `benchmark_result` |
 
-## 快速部署 (Minikube)
-
-```bash
-# 1. 啟動 minikube（若尚未啟動）
-minikube start
-
-# 2. 套用 manifest
-kubectl apply -f k8s/deploy.yaml
-
-# 3. 確認 Pods 就緒
-kubectl get pods -n cpu-bench
-
-# 4. 開啟儀表板
-minikube service dashboard -n cpu-bench
-```
-
-## 手動部署流程
+## 部署流程
 
 ### 1. Build Docker 映像檔
 
@@ -132,25 +116,6 @@ kubectl get services -n cpu-bench
 
 ### 5. 開啟儀表板
 
-**Minikube:**
-```bash
-minikube service dashboard -n cpu-bench
-```
-
-**雲端 K8s (GKE/EKS/AKS) — NodePort:**
-```bash
-# NodePort 固定為 30080
-kubectl get nodes -o wide   # 取得 Node IP
-# 瀏覽器開啟 http://<NODE_IP>:30080
-```
-
-**改為 LoadBalancer:**
-```bash
-kubectl patch svc dashboard -n cpu-bench -p '{"spec":{"type":"LoadBalancer"}}'
-kubectl get svc dashboard -n cpu-bench  # 等待 EXTERNAL-IP
-```
-
-**Port-forward（任何環境）:**
 ```bash
 kubectl port-forward --address <your ip address> svc/dashboard 3000:3000 -n cpu-bench
 # 開啟 http://<your ip address>:3000
@@ -160,9 +125,9 @@ kubectl port-forward --address <your ip address> svc/dashboard 3000:3000 -n cpu-
 
 | 任務 | 內容 | CPU 特性 |
 |------|------|----------|
-| **質數計算** | 計算 50,000 以內的質數 | 持續迴圈運算，最能展示 throttle |
-| **費氏數列** | 遞迴計算 fibonacci(36) | 指數級呼叫堆疊，瞬間大量 CPU |
-| **矩陣乘法** | 200×200 矩陣相乘 | 密集浮點數運算 |
+| **質數計算**（Dashboard：Primes） | 計算 50,000 以內的質數 | 持續迴圈運算，最能展示 throttle |
+| **費氏數列**（Dashboard：Fibonacci） | 遞迴計算 fibonacci(36) | 指數級呼叫堆疊，瞬間大量 CPU |
+| **矩陣乘法**（Dashboard：Matrix） | 200×200 矩陣相乘 | 密集浮點數運算 |
 
 ## 調整 CPU Limit
 
