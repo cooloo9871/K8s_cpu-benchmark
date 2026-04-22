@@ -198,9 +198,9 @@
   </section>
 
   <section>
-    <div class="sec-title">多 Process 效益比較 — 質數計算 500,000 以內（1 個 vs 4 個 Process）</div>
+    <div class="sec-title">多執行緒效益比較 — numpy 500×500 矩陣乘法 ×8（1 條 vs 4 條執行緒）</div>
     <div class="run-row" style="margin-bottom:20px">
-      <button class="run-btn" id="threadBtn" onclick="runThreadBench()">▶ 執行多 Process 壓測</button>
+      <button class="run-btn" id="threadBtn" onclick="runThreadBench()">▶ 執行多執行緒壓測</button>
       <span class="run-count" id="threadStatus">尚未執行</span>
     </div>
     <div class="cards" style="margin-bottom:16px">
@@ -210,8 +210,8 @@
           <div class="badge" id="tl-badge">讀取中...</div>
         </div>
         <div class="metrics">
-          <div class="metric"><div class="m-label">1 個 Process</div><div class="m-value ph" id="tl1" style="font-size:34px">—</div><div class="m-unit">毫秒</div></div>
-          <div class="metric"><div class="m-label">4 個 Process</div><div class="m-value ph" id="tl4" style="font-size:34px">—</div><div class="m-unit">毫秒</div></div>
+          <div class="metric"><div class="m-label">1 條執行緒</div><div class="m-value ph" id="tl1" style="font-size:34px">—</div><div class="m-unit">毫秒</div></div>
+          <div class="metric"><div class="m-label">4 條執行緒</div><div class="m-value ph" id="tl4" style="font-size:34px">—</div><div class="m-unit">毫秒</div></div>
           <div class="metric"><div class="m-label">並行效益</div><div class="m-value ph" id="tls" style="font-size:28px;white-space:nowrap">—</div><div class="m-unit">&nbsp;</div></div>
         </div>
       </div>
@@ -221,8 +221,8 @@
           <div class="badge" id="tu-badge">讀取中...</div>
         </div>
         <div class="metrics">
-          <div class="metric"><div class="m-label">1 個 Process</div><div class="m-value ph" id="tu1" style="font-size:34px">—</div><div class="m-unit">毫秒</div></div>
-          <div class="metric"><div class="m-label">4 個 Process</div><div class="m-value ph" id="tu4" style="font-size:34px">—</div><div class="m-unit">毫秒</div></div>
+          <div class="metric"><div class="m-label">1 條執行緒</div><div class="m-value ph" id="tu1" style="font-size:34px">—</div><div class="m-unit">毫秒</div></div>
+          <div class="metric"><div class="m-label">4 條執行緒</div><div class="m-value ph" id="tu4" style="font-size:34px">—</div><div class="m-unit">毫秒</div></div>
           <div class="metric"><div class="m-label">並行效益</div><div class="m-value ph" id="tus" style="font-size:28px;white-space:nowrap">—</div><div class="m-unit">&nbsp;</div></div>
         </div>
       </div>
@@ -254,7 +254,7 @@ function fmtSpeedup(s){
   return `慢了 ${(1/s).toFixed(2)} 倍`;
 }
 function limDesc(s){
-  return s<1?'CPU throttle 導致多 Process 反而更慢':'CPU throttle 大幅限制並行效益';
+  return s<1?'CPU throttle 導致多執行緒反而更慢':'CPU throttle 大幅限制執行緒並行效益';
 }
 
 function updateBadges(limited, unlimited){
@@ -343,7 +343,7 @@ async function runThreadBench(){
     const d=await res.json();
     const L=d.limited,U=d.unlimited;
     if(L.error||U.error){
-      log('多 Process 壓測錯誤：'+(L.error||U.error));
+      log('多執行緒壓測錯誤：'+(L.error||U.error));
       document.getElementById('threadStatus').textContent='錯誤';
       return;
     }
@@ -359,11 +359,11 @@ async function runThreadBench(){
     const ins=document.getElementById('threadInsight');
     ins.style.display='block';
     ins.innerHTML=
-      `● CPU Limited — 4 個 Process 效益：<span style="color:var(--lim)">${fmtSpeedup(L.speedup)}</span>（${limDesc(L.speedup)}）<br>`+
-      `● CPU Unlimited — 4 個 Process 效益：<span style="color:var(--unlim)">${fmtSpeedup(U.speedup)}</span>（可實際利用多核心）<br>`+
-      `● 結論：在 CPU Limited container 中，增加 Process 數無法提升效能，多核心優勢被 throttle 完全抵消。`;
+      `● CPU Limited — 4 條執行緒效益：<span style="color:var(--lim)">${fmtSpeedup(L.speedup)}</span>（${limDesc(L.speedup)}）<br>`+
+      `● CPU Unlimited — 4 條執行緒效益：<span style="color:var(--unlim)">${fmtSpeedup(U.speedup)}</span>（可實際利用多核心）<br>`+
+      `● 結論：在 CPU Limited container 中，增加執行緒數無法提升效能，多核心優勢被 throttle 完全抵消。`;
     document.getElementById('threadStatus').textContent='完成';
-    log(`多 Process — 受限：1個=${L.single_ms}ms / 4個=${L.multi_ms}ms（${fmtSpeedup(L.speedup)}）| 無限制：1個=${U.single_ms}ms / 4個=${U.multi_ms}ms（${fmtSpeedup(U.speedup)}）`);
+    log(`多執行緒 — 受限：1條=${L.single_ms}ms / 4條=${L.multi_ms}ms（${fmtSpeedup(L.speedup)}）| 無限制：1條=${U.single_ms}ms / 4條=${U.multi_ms}ms（${fmtSpeedup(U.speedup)}）`);
   }catch(e){log('THREAD ERROR: '+e.message);}
   finally{document.getElementById('overlay').classList.remove('on');document.getElementById('threadBtn').disabled=false;}
 }

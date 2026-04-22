@@ -1,8 +1,8 @@
 import os
 import time
 import math
-import threading
-from concurrent.futures import ProcessPoolExecutor
+import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, jsonify
 from datetime import datetime
 
@@ -62,13 +62,11 @@ def fibonacci(n):
         return n
     return fibonacci(n - 1) + fibonacci(n - 2)
 
-def _count_primes_chunk(args):
-    start, end = args
-    count = 0
-    for n in range(max(2, start), end + 1):
-        if is_prime(n):
-            count += 1
-    return count
+def _numpy_matrix_work(_):
+    """numpy 矩陣乘法 — 在 C 層執行，會釋放 GIL，可真正多執行緒並行"""
+    a = np.random.rand(500, 500)
+    b = np.random.rand(500, 500)
+    return np.dot(a, b)
 
 def matrix_multiply(size):
     """Matrix multiplication"""
@@ -184,25 +182,24 @@ def bench_all():
 
 @app.route("/bench/threads")
 def bench_threads():
-    limit = 500000
     workers = 4
+    tasks = workers * 2  # 共 8 次矩陣乘法，分配給 1 或 4 條執行緒
 
     start = time.perf_counter()
-    count_primes(limit)
+    for i in range(tasks):
+        _numpy_matrix_work(i)
     single_ms = round((time.perf_counter() - start) * 1000, 2)
 
-    chunk = limit // workers
-    ranges = [(i * chunk, (i + 1) * chunk - 1 if i < workers - 1 else limit)
-              for i in range(workers)]
     start = time.perf_counter()
-    with ProcessPoolExecutor(max_workers=workers) as executor:
-        list(executor.map(_count_primes_chunk, ranges))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        list(executor.map(_numpy_matrix_work, range(tasks)))
     multi_ms = round((time.perf_counter() - start) * 1000, 2)
 
     return jsonify({
         "task": "thread_compare",
-        "limit": limit,
+        "workload": "numpy 500x500 matmul x8",
         "workers": workers,
+        "tasks": tasks,
         "single_ms": single_ms,
         "multi_ms": multi_ms,
         "speedup": round(single_ms / multi_ms, 2) if multi_ms > 0 else 0,

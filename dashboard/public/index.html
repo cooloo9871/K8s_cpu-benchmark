@@ -649,9 +649,9 @@
 
   <!-- Thread Benchmark -->
   <div class="comparison-section">
-    <div class="section-title">多 Process 效益比較 — 質數計算 500,000 以內（1 個 vs 4 個 Process）</div>
+    <div class="section-title">多執行緒效益比較 — numpy 500×500 矩陣乘法 ×8（1 條 vs 4 條執行緒）</div>
     <div class="run-section" style="margin-bottom:20px">
-      <button class="run-btn" id="thread-btn" onclick="runThreadBenchmark()">▶ 執行多 Process 壓測</button>
+      <button class="run-btn" id="thread-btn" onclick="runThreadBenchmark()">▶ 執行多執行緒壓測</button>
       <span class="run-count" id="thread-status">尚未執行</span>
     </div>
     <div class="cards" style="margin-bottom:16px">
@@ -664,8 +664,8 @@
           <div class="card-badge" id="tl-badge">讀取中...</div>
         </div>
         <div class="metrics">
-          <div class="metric"><div class="metric-label">1 個 Process</div><div class="metric-value metric-placeholder" id="lim-t1" style="font-size:34px">—</div><div class="metric-unit">毫秒</div></div>
-          <div class="metric"><div class="metric-label">4 個 Process</div><div class="metric-value metric-placeholder" id="lim-t4" style="font-size:34px">—</div><div class="metric-unit">毫秒</div></div>
+          <div class="metric"><div class="metric-label">1 條執行緒</div><div class="metric-value metric-placeholder" id="lim-t1" style="font-size:34px">—</div><div class="metric-unit">毫秒</div></div>
+          <div class="metric"><div class="metric-label">4 條執行緒</div><div class="metric-value metric-placeholder" id="lim-t4" style="font-size:34px">—</div><div class="metric-unit">毫秒</div></div>
           <div class="metric"><div class="metric-label">並行效益</div><div class="metric-value metric-placeholder" id="lim-ts" style="font-size:28px;white-space:nowrap">—</div><div class="metric-unit">&nbsp;</div></div>
         </div>
       </div>
@@ -678,8 +678,8 @@
           <div class="card-badge" id="tu-badge">讀取中...</div>
         </div>
         <div class="metrics">
-          <div class="metric"><div class="metric-label">1 個 Process</div><div class="metric-value metric-placeholder" id="unlim-t1" style="font-size:34px">—</div><div class="metric-unit">毫秒</div></div>
-          <div class="metric"><div class="metric-label">4 個 Process</div><div class="metric-value metric-placeholder" id="unlim-t4" style="font-size:34px">—</div><div class="metric-unit">毫秒</div></div>
+          <div class="metric"><div class="metric-label">1 條執行緒</div><div class="metric-value metric-placeholder" id="unlim-t1" style="font-size:34px">—</div><div class="metric-unit">毫秒</div></div>
+          <div class="metric"><div class="metric-label">4 條執行緒</div><div class="metric-value metric-placeholder" id="unlim-t4" style="font-size:34px">—</div><div class="metric-unit">毫秒</div></div>
           <div class="metric"><div class="metric-label">並行效益</div><div class="metric-value metric-placeholder" id="unlim-ts" style="font-size:28px;white-space:nowrap">—</div><div class="metric-unit">&nbsp;</div></div>
         </div>
       </div>
@@ -717,7 +717,7 @@ function fmtSpeedup(s) {
   return `慢了 ${(1/s).toFixed(2)} 倍`;
 }
 function limDesc(s) {
-  return s < 1 ? 'CPU throttle 導致多 Process 反而更慢' : 'CPU throttle 大幅限制並行效益';
+  return s < 1 ? 'CPU throttle 導致多執行緒反而更慢' : 'CPU throttle 大幅限制執行緒並行效益';
 }
 
 function updateBadges(limited, unlimited) {
@@ -803,7 +803,7 @@ function runThreadBenchmark() {
   btn.disabled = true;
   document.getElementById('thread-status').textContent = '執行中...';
   document.getElementById('loading').classList.add('active');
-  addLog('多 Process 壓測開始 — 1 個 vs 4 個 Process...');
+  addLog('多執行緒壓測開始 — 1 條 vs 4 條執行緒...');
   socket.emit('run_thread_benchmark');
 }
 
@@ -832,12 +832,12 @@ socket.on('thread_benchmark_result', (data) => {
   const ins = document.getElementById('thread-insight');
   ins.style.display = 'block';
   ins.innerHTML =
-    `● CPU Limited — 4 個 Process 效益：<span style="color:var(--limited)">${fmtSpeedup(limited.speedup)}</span>（${limDesc(limited.speedup)}）<br>` +
-    `● CPU Unlimited — 4 個 Process 效益：<span style="color:var(--unlimited)">${fmtSpeedup(unlimited.speedup)}</span>（可實際利用多核心）<br>` +
-    `● 結論：在 CPU Limited container 中，增加 Process 數無法提升效能，多核心優勢被 throttle 完全抵消。`;
+    `● CPU Limited — 4 條執行緒效益：<span style="color:var(--limited)">${fmtSpeedup(limited.speedup)}</span>（${limDesc(limited.speedup)}）<br>` +
+    `● CPU Unlimited — 4 條執行緒效益：<span style="color:var(--unlimited)">${fmtSpeedup(unlimited.speedup)}</span>（可實際利用多核心）<br>` +
+    `● 結論：在 CPU Limited container 中，增加執行緒數無法提升效能，多核心優勢被 throttle 完全抵消。`;
 
   document.getElementById('thread-status').textContent = '完成';
-  addLog(`多 Process — 受限：1個=${limited.single_ms}ms / 4個=${limited.multi_ms}ms（${fmtSpeedup(limited.speedup)}）| 無限制：1個=${unlimited.single_ms}ms / 4個=${unlimited.multi_ms}ms（${fmtSpeedup(unlimited.speedup)}）`);
+  addLog(`多執行緒 — 受限：1條=${limited.single_ms}ms / 4條=${limited.multi_ms}ms（${fmtSpeedup(limited.speedup)}）| 無限制：1條=${unlimited.single_ms}ms / 4條=${unlimited.multi_ms}ms（${fmtSpeedup(unlimited.speedup)}）`);
 });
 
 function runBenchmark() {
