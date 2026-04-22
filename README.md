@@ -85,7 +85,7 @@ Dashboard 有兩個 server 實作，目前 **Dockerfile 使用 Python 版**：
 
 ## 部署流程
 
-### 1. Build Docker 映像檔
+### 1. Build Container 映像檔
 
 ```bash
 # Worker
