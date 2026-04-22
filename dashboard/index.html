@@ -141,7 +141,7 @@
   <div class="cards">
     <div class="card lim">
       <div class="card-hd">
-        <div><div class="card-sub">Pod A</div><div class="card-name">CPU Limited</div></div>
+        <div><div class="card-sub" id="lpod">Pod A</div><div class="card-name">CPU Limited</div></div>
         <div class="badge">limits.cpu: 100m</div>
       </div>
       <div class="metrics">
@@ -153,7 +153,7 @@
     </div>
     <div class="card unlim">
       <div class="card-hd">
-        <div><div class="card-sub">Pod B</div><div class="card-name">CPU Unlimited</div></div>
+        <div><div class="card-sub" id="upod">Pod B</div><div class="card-name">CPU Unlimited</div></div>
         <div class="badge">No limits set</div>
       </div>
       <div class="metrics">
@@ -282,6 +282,8 @@ async function runBench(){
     runN++;
     document.getElementById('runCount').textContent='Run #'+runN;
     const lb=L.benchmarks,ub=U.benchmarks;
+    document.getElementById('lpod').textContent=L.pod_name||'Pod A';
+    document.getElementById('upod').textContent=U.pod_name||'Pod B';
     document.getElementById('lp').textContent=lb.primes.elapsed_ms;
     document.getElementById('lf').textContent=lb.fibonacci.elapsed_ms;
     document.getElementById('lm').textContent=lb.matrix.elapsed_ms;

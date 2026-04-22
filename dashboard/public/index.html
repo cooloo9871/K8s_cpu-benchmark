@@ -523,7 +523,7 @@
     <div class="card limited">
       <div class="card-header">
         <div>
-          <div class="card-title">Pod A</div>
+          <div class="card-title" id="lim-pod">Pod A</div>
           <div class="card-label">CPU Limited</div>
         </div>
         <div class="card-badge">limits.cpu: 100m</div>
@@ -557,7 +557,7 @@
     <div class="card unlimited">
       <div class="card-header">
         <div>
-          <div class="card-title">Pod B</div>
+          <div class="card-title" id="unlim-pod">Pod B</div>
           <div class="card-label">CPU Unlimited</div>
         </div>
         <div class="card-badge">No limits set</div>
@@ -755,6 +755,8 @@ socket.on('benchmark_result', (data) => {
   const lb = limited.benchmarks;
   const ub = unlimited.benchmarks;
 
+  document.getElementById('lim-pod').textContent = limited.pod_name || 'Pod A';
+  document.getElementById('unlim-pod').textContent = unlimited.pod_name || 'Pod B';
   document.getElementById('lim-primes').textContent = lb.primes.elapsed_ms;
   document.getElementById('lim-fib').textContent = lb.fibonacci.elapsed_ms;
   document.getElementById('lim-matrix').textContent = lb.matrix.elapsed_ms;
