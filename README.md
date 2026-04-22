@@ -94,7 +94,7 @@ podman build -t YOUR_REGISTRY/cpu-bench-worker:latest ./worker
 podman push YOUR_REGISTRY/cpu-bench-worker:latest
 
 # Dashboard
-podamn build -t YOUR_REGISTRY/cpu-bench-dashboard:latest ./dashboard
+podman build -t YOUR_REGISTRY/cpu-bench-dashboard:latest ./dashboard
 podman push YOUR_REGISTRY/cpu-bench-dashboard:latest
 ```
 
@@ -140,7 +140,7 @@ kubectl port-forward --address <your ip address> svc/dashboard 3000:3000 -n cpu-
 | CPU Unlimited | ~Xms | ~X/4ms | ~4x | 4 core 真正並行 |
 | CPU Limited (100m) | ~Xms | ~Xms | ~1x | throttle 吃掉所有並行優勢 |
 
-> **結論**：CPU limit 下，多執行緒是無效的。應用程式擴展執行緒數不會帶來任何效能提升，因為容器的 CPU 時間預算是固定的。
+> **結論**：CPU limit 下，多執行緒是無效的。應用程式擴展執行緒數不會帶來任何效能提升，因為 container 的 CPU 時間預算是固定的。
 
 ## 調整 CPU Limit
 

@@ -666,8 +666,8 @@
         <div class="metrics">
           <div class="metric"><div class="metric-label">1 個 Process</div><div class="metric-value metric-placeholder" id="lim-t1">—</div><div class="metric-unit">毫秒</div></div>
           <div class="metric"><div class="metric-label">4 個 Process</div><div class="metric-value metric-placeholder" id="lim-t4">—</div><div class="metric-unit">毫秒</div></div>
-          <div class="metric"><div class="metric-label">加速效益</div><div class="metric-value metric-placeholder" id="lim-ts">—</div><div class="metric-unit">倍</div></div>
         </div>
+        <div class="total-metric" style="margin-top:12px"><div class="total-label">並行效益</div><div class="metric-value metric-placeholder" id="lim-ts" style="font-size:36px">—</div></div>
       </div>
       <div class="card unlimited">
         <div class="card-header">
@@ -679,9 +679,9 @@
         </div>
         <div class="metrics">
           <div class="metric"><div class="metric-label">1 個 Process</div><div class="metric-value metric-placeholder" id="unlim-t1">—</div><div class="metric-unit">毫秒</div></div>
-          <div class="metric"><div class="metric-label">4 個 Process</div><div class="metric-value metric-placeholder" id="unlim-t4">—</div><div class="metric-unit">ms</div></div>
-          <div class="metric"><div class="metric-label">加速效益</div><div class="metric-value metric-placeholder" id="unlim-ts">—</div><div class="metric-unit">倍</div></div>
+          <div class="metric"><div class="metric-label">4 個 Process</div><div class="metric-value metric-placeholder" id="unlim-t4">—</div><div class="metric-unit">毫秒</div></div>
         </div>
+        <div class="total-metric" style="margin-top:12px"><div class="total-label">並行效益</div><div class="metric-value metric-placeholder" id="unlim-ts" style="font-size:36px">—</div></div>
       </div>
     </div>
     <div id="thread-insight" style="display:none;padding:14px 18px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;font-family:var(--mono);font-size:18px;line-height:1.9;color:var(--muted)"></div>
@@ -711,6 +711,14 @@
 <script>
 const socket = io();
 let runCount = 0;
+
+function fmtSpeedup(s) {
+  if (s >= 1) return `快了 ${s} 倍`;
+  return `慢了 ${(1/s).toFixed(2)} 倍`;
+}
+function limDesc(s) {
+  return s < 1 ? 'CPU throttle 導致多 Process 反而更慢' : 'CPU throttle 大幅限制並行效益';
+}
 
 function updateBadges(limited, unlimited) {
   if (limited && !limited.error) {
@@ -814,22 +822,22 @@ socket.on('thread_benchmark_result', (data) => {
   document.getElementById('unlim-thread-pod').textContent = unlimited.pod_name || '—';
   document.getElementById('lim-t1').textContent = limited.single_ms;
   document.getElementById('lim-t4').textContent = limited.multi_ms;
-  document.getElementById('lim-ts').textContent = limited.speedup;
+  document.getElementById('lim-ts').textContent = fmtSpeedup(limited.speedup);
   document.getElementById('unlim-t1').textContent = unlimited.single_ms;
   document.getElementById('unlim-t4').textContent = unlimited.multi_ms;
-  document.getElementById('unlim-ts').textContent = unlimited.speedup;
+  document.getElementById('unlim-ts').textContent = fmtSpeedup(unlimited.speedup);
   ['lim-t1','lim-t4','lim-ts','unlim-t1','unlim-t4','unlim-ts'].forEach(id =>
     document.getElementById(id).classList.remove('metric-placeholder'));
 
   const ins = document.getElementById('thread-insight');
   ins.style.display = 'block';
   ins.innerHTML =
-    `● CPU Limited — 4 個 Process 加速效益：<span style="color:var(--limited)">快了 ${limited.speedup} 倍</span>（CPU throttle 將並行優勢完全抵消）<br>` +
-    `● CPU Unlimited — 4 個 Process 加速效益：<span style="color:var(--unlimited)">快了 ${unlimited.speedup} 倍</span>（可實際利用多核心）<br>` +
-    `● 結論：在 CPU Limited容器中，增加 Process 數無法提升效能，多核心優勢被 throttle 完全抵消。`;
+    `● CPU Limited — 4 個 Process 效益：<span style="color:var(--limited)">${fmtSpeedup(limited.speedup)}</span>（${limDesc(limited.speedup)}）<br>` +
+    `● CPU Unlimited — 4 個 Process 效益：<span style="color:var(--unlimited)">${fmtSpeedup(unlimited.speedup)}</span>（可實際利用多核心）<br>` +
+    `● 結論：在 CPU Limited container 中，增加 Process 數無法提升效能，多核心優勢被 throttle 完全抵消。`;
 
   document.getElementById('thread-status').textContent = '完成';
-  addLog(`多 Process — 受限：1個=${limited.single_ms}ms / 4個=${limited.multi_ms}ms（快了 ${limited.speedup} 倍）| 無限制：1個=${unlimited.single_ms}ms / 4個=${unlimited.multi_ms}ms（快了 ${unlimited.speedup} 倍）`);
+  addLog(`多 Process — 受限：1個=${limited.single_ms}ms / 4個=${limited.multi_ms}ms（${fmtSpeedup(limited.speedup)}）| 無限制：1個=${unlimited.single_ms}ms / 4個=${unlimited.multi_ms}ms（${fmtSpeedup(unlimited.speedup)}）`);
 });
 
 function runBenchmark() {
@@ -870,8 +878,11 @@ socket.on('benchmark_result', (data) => {
   document.getElementById('unlim-matrix').textContent = ub.matrix.elapsed_ms;
   document.getElementById('unlim-total').textContent = unlimited.total_elapsed_ms;
 
-  // Remove placeholder class
-  document.querySelectorAll('.metric-value').forEach(el => el.classList.remove('metric-placeholder'));
+  // Remove placeholder class from main benchmark cards only
+  ['lim-primes','lim-fib','lim-matrix','lim-total','unlim-primes','unlim-fib','unlim-matrix','unlim-total'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('metric-placeholder');
+  });
 
   // Update comparison bars
   const tasks = [
@@ -885,7 +896,7 @@ socket.on('benchmark_result', (data) => {
     const maxVal = Math.max(limVal, unlimVal);
     const limPct = Math.round((limVal / maxVal) * 100);
     const unlimPct = Math.round((unlimVal / maxVal) * 100);
-    const speedup = (limVal / unlimVal).toFixed(2);
+    const ratio = limVal / unlimVal;
 
     const barLim = document.getElementById(`bar-lim-${key}`);
     const barUnlim = document.getElementById(`bar-unlim-${key}`);
@@ -895,8 +906,8 @@ socket.on('benchmark_result', (data) => {
     barLim.textContent = limVal + ' ms';
     barUnlim.style.width = unlimPct + '%';
     barUnlim.textContent = unlimVal + ' ms';
-    speedupEl.textContent = speedup + 'x';
-    speedupEl.style.color = speedup > 1.5 ? '#ffa502' : '#2ed573';
+    speedupEl.textContent = fmtSpeedup(ratio);
+    speedupEl.style.color = ratio >= 3 ? '#ff4757' : ratio >= 1.5 ? '#ffa502' : '#2ed573';
   });
 
   // Update chart
