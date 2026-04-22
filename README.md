@@ -152,7 +152,7 @@ kubectl get svc dashboard -n cpu-bench  # 等待 EXTERNAL-IP
 
 **Port-forward（任何環境）:**
 ```bash
-kubectl port-forward svc/dashboard 3000:3000 -n cpu-bench
+kubectl port-forward --address <your ip address> svc/dashboard 3000:3000 -n cpu-bench
 # 開啟 http://localhost:3000
 ```
 
