@@ -132,7 +132,7 @@
     <button class="run-btn" id="runBtn" onclick="runBench()">▶ 執行壓測</button>
     <span class="run-count" id="runCount">第 0 次</span>
     <div class="legend">
-      <div class="legend-item"><div class="ldot" style="background:var(--lim)"></div>CPU Limited (100m)</div>
+      <div class="legend-item"><div class="ldot" style="background:var(--lim)"></div><span id="leg-lim">CPU Limited</span></div>
       <div class="legend-item"><div class="ldot" style="background:var(--unlim)"></div>CPU Unlimited</div>
     </div>
   </div>
@@ -254,6 +254,8 @@ function updateBadges(limited, unlimited){
     const txt=limited.cpu_limit?`limits.cpu: ${limited.cpu_limit}`:'未設定 CPU 限制';
     document.getElementById('lim-badge').textContent=txt;
     document.getElementById('tl-badge').textContent=txt;
+    const legTxt=limited.cpu_limit?`CPU Limited (${limited.cpu_limit})`:'CPU Limited';
+    document.getElementById('leg-lim').textContent=legTxt;
   }
   if(unlimited&&!unlimited.error){
     const txt=unlimited.cpu_limit?`limits.cpu: ${unlimited.cpu_limit}`:'未設定 CPU 限制';
@@ -272,7 +274,7 @@ async function fetchWorkerInfo(){
 fetchWorkerInfo();
 const ctx=document.getElementById('chart').getContext('2d');
 const chart=new Chart(ctx,{type:'line',data:{labels:histLbls,datasets:[
-  {label:'CPU Limited (100m)',data:histL,borderColor:'#ff4757',backgroundColor:'rgba(255,71,87,.1)',fill:true,tension:.4,pointBackgroundColor:'#ff4757',pointRadius:6,pointHoverRadius:8},
+  {label:'CPU Limited',data:histL,borderColor:'#ff4757',backgroundColor:'rgba(255,71,87,.1)',fill:true,tension:.4,pointBackgroundColor:'#ff4757',pointRadius:6,pointHoverRadius:8},
   {label:'CPU Unlimited',data:histU,borderColor:'#2ed573',backgroundColor:'rgba(46,213,115,.1)',fill:true,tension:.4,pointBackgroundColor:'#2ed573',pointRadius:6,pointHoverRadius:8}
 ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8b949e',font:{family:'Share Tech Mono',size:13}}}},scales:{x:{ticks:{color:'#8b949e',font:{size:13}},grid:{color:'#21262d'}},y:{ticks:{color:'#8b949e',font:{size:13},callback:v=>v+' ms'},grid:{color:'#21262d'}}}}});
 
@@ -345,7 +347,7 @@ async function runThreadBench(){
     const ins=document.getElementById('threadInsight');
     ins.style.display='block';
     ins.innerHTML=
-      `● CPU Limited (100m) — 4 個 Process 加速效益：<span style="color:var(--lim)">快了 ${L.speedup} 倍</span>（CPU throttle 將並行優勢完全抵消）<br>`+
+      `● CPU Limited — 4 個 Process 加速效益：<span style="color:var(--lim)">快了 ${L.speedup} 倍</span>（CPU throttle 將並行優勢完全抵消）<br>`+
       `● CPU Unlimited — 4 個 Process 加速效益：<span style="color:var(--unlim)">快了 ${U.speedup} 倍</span>（可實際利用多核心）<br>`+
       `● 結論：在 CPU Limited容器中，增加 Process 數無法提升效能，多核心優勢被 throttle 完全抵消。`;
     document.getElementById('threadStatus').textContent='完成';

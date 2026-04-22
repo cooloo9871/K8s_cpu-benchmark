@@ -58,7 +58,7 @@ io.on('connection', (socket) => {
     socket.emit('benchmark_start', { timestamp: new Date().toISOString() });
 
     const [limited, unlimited] = await Promise.all([
-      runBench(WORKER_LIMITED_URL, 'CPU Limited (100m)'),
+      runBench(WORKER_LIMITED_URL, 'CPU Limited'),
       runBench(WORKER_UNLIMITED_URL, 'CPU Unlimited'),
     ]);
 
@@ -68,7 +68,7 @@ io.on('connection', (socket) => {
   socket.on('run_thread_benchmark', async () => {
     socket.emit('benchmark_start', { timestamp: new Date().toISOString() });
     const [limited, unlimited] = await Promise.all([
-      runThreadBenchWorker(WORKER_LIMITED_URL, 'CPU Limited (100m)'),
+      runThreadBenchWorker(WORKER_LIMITED_URL, 'CPU Limited'),
       runThreadBenchWorker(WORKER_UNLIMITED_URL, 'CPU Unlimited'),
     ]);
     socket.emit('thread_benchmark_result', { limited, unlimited, timestamp: new Date().toISOString() });

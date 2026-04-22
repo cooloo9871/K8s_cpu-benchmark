@@ -47,7 +47,7 @@ class Handler(SimpleHTTPRequestHandler):
             results = {}
             def run(url, key, label):
                 results[key] = fetch_bench(url, label)
-            t1 = threading.Thread(target=run, args=(LIMITED_URL,   "limited",   "CPU Limited (100m)"))
+            t1 = threading.Thread(target=run, args=(LIMITED_URL,   "limited",   "CPU Limited"))
             t2 = threading.Thread(target=run, args=(UNLIMITED_URL, "unlimited", "CPU Unlimited"))
             t1.start(); t2.start()
             t1.join();  t2.join()
@@ -62,7 +62,7 @@ class Handler(SimpleHTTPRequestHandler):
                         results[key] = data
                 except Exception as e:
                     results[key] = {"label": label, "error": str(e)}
-            t1 = threading.Thread(target=run_thread, args=(LIMITED_URL,   "limited",   "CPU Limited (100m)"))
+            t1 = threading.Thread(target=run_thread, args=(LIMITED_URL,   "limited",   "CPU Limited"))
             t2 = threading.Thread(target=run_thread, args=(UNLIMITED_URL, "unlimited", "CPU Unlimited"))
             t1.start(); t2.start()
             t1.join();  t2.join()
