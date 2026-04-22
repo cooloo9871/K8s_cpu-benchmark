@@ -1,4 +1,9 @@
 import os
+# 限制 BLAS 內部執行緒為 1，避免與 ThreadPoolExecutor 競爭
+os.environ.setdefault('OMP_NUM_THREADS', '1')
+os.environ.setdefault('MKL_NUM_THREADS', '1')
+os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
+os.environ.setdefault('BLIS_NUM_THREADS', '1')
 import time
 import math
 import numpy as np
