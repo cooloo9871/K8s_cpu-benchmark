@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>K8s CPU Throttle Benchmark</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600;800&display=swap" rel="stylesheet">
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #080c10;
+    --surface: #0d1117;
+    --surface2: #161b22;
+    --border: #21262d;
+    --limited: #ff4757;
+    --unlimited: #2ed573;
+    --accent: #ffa502;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --mono: 'Share Tech Mono', monospace;
+    --sans: 'Barlow', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface);
+  }
+
+  .logo-area {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .logo-icon {
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg, var(--accent), #ff6b35);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+  }
+
+  .logo-text h1 {
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .logo-text span {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.15em;
+  }
+
+  .header-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--unlimited);
+    box-shadow: 0 0 8px var(--unlimited);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  main {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 32px 40px;
+  }
+
+  /* Run Button */
+  .run-section {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 32px;
+  }
+
+  .run-btn {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 14px 40px;
+    background: transparent;
+    border: 2px solid var(--accent);
+    color: var(--accent);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .run-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--accent);
+    transform: translateX(-100%);
+    transition: transform 0.2s;
+    z-index: -1;
+  }
+
+  .run-btn:hover::before { transform: translateX(0); }
+  .run-btn:hover { color: var(--bg); }
+  .run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .run-btn:disabled::before { display: none; }
+
+  .run-count {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    gap: 24px;
+    margin-left: auto;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+  }
+
+  /* Cards grid */
+  .cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 28px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+  }
+
+  .card.limited::after { background: var(--limited); }
+  .card.unlimited::after { background: var(--unlimited); }
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 20px;
+  }
+
+  .card-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+
+  .card-label {
+    font-size: 20px;
+    font-weight: 800;
+  }
+
+  .card.limited .card-label { color: var(--limited); }
+  .card.unlimited .card-label { color: var(--unlimited); }
+
+  .card-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+  }
+
+  .card.limited .card-badge { color: var(--limited); border-color: var(--limited); }
+  .card.unlimited .card-badge { color: var(--unlimited); border-color: var(--unlimited); }
+
+  /* Metrics */
+  .metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+  }
+
+  .metric {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+  }
+
+  .metric-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+
+  .metric-value {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 400;
+    line-height: 1;
+  }
+
+  .metric-unit {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .metric-placeholder {
+    color: var(--border);
+  }
+
+  /* Total metric */
+  .total-metric {
+    grid-column: 1 / -1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 4px;
+  }
+
+  .total-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .total-value {
+    font-family: var(--mono);
+    font-size: 32px;
+    font-weight: 400;
+  }
+
+  .card.limited .total-value { color: var(--limited); }
+  .card.unlimited .total-value { color: var(--unlimited); }
+
+  /* Chart section */
+  .chart-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 28px;
+    margin-bottom: 28px;
+  }
+
+  .section-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .chart-container {
+    position: relative;
+    height: 280px;
+  }
+
+  /* Comparison bar */
+  .comparison-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 28px;
+    margin-bottom: 28px;
+  }
+
+  .compare-row {
+    display: grid;
+    grid-template-columns: 140px 1fr 1fr 100px;
+    gap: 16px;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+
+  .compare-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    text-align: right;
+  }
+
+  .bar-track {
+    height: 28px;
+    background: var(--surface2);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+    border: 1px solid var(--border);
+  }
+
+  .bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    padding-left: 10px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    white-space: nowrap;
+  }
+
+  .bar-fill.limited { background: linear-gradient(90deg, #ff4757, #ff6b81); color: white; }
+  .bar-fill.unlimited { background: linear-gradient(90deg, #2ed573, #7bed9f); color: #080c10; }
+
+  .speedup-badge {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  /* History log */
+  .log-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+  }
+
+  .log-entries {
+    max-height: 160px;
+    overflow-y: auto;
+  }
+
+  .log-entry {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 16px;
+  }
+
+  .log-time { color: var(--accent); min-width: 80px; }
+  .log-msg { color: var(--text); }
+
+  /* Loading */
+  .loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(8, 12, 16, 0.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    backdrop-filter: blur(4px);
+  }
+
+  .loading-overlay.active { display: flex; }
+
+  .loading-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 48px 64px;
+    text-align: center;
+  }
+
+  .loading-spinner {
+    width: 60px;
+    height: 60px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 24px;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loading-text {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    animation: blink 1s ease-in-out infinite;
+  }
+
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  .loading-sub {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-area">
+    <div class="logo-icon">⚙️</div>
+    <div class="logo-text">
+      <h1>CPU Throttle Benchmark</h1>
+      <span>KUBERNETES · CPU LIMIT PERFORMANCE ANALYSIS</span>
+    </div>
+  </div>
+  <div class="header-status">
+    <div class="status-dot"></div>
+    <span id="connection-status">CONNECTED</span>
+  </div>
+</header>
+
+<main>
+  <div class="run-section">
+    <button class="run-btn" id="run-btn" onclick="runBenchmark()">▶ Run Benchmark</button>
+    <span class="run-count" id="run-count">Run #0</span>
+    <div class="legend">
+      <div class="legend-item">
+        <div class="legend-dot" style="background:var(--limited)"></div>
+        <span>CPU Limited (100m)</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot" style="background:var(--unlimited)"></div>
+        <span>CPU Unlimited</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pod Cards -->
+  <div class="cards">
+    <div class="card limited">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Pod A</div>
+          <div class="card-label">CPU Limited</div>
+        </div>
+        <div class="card-badge">limits.cpu: 100m</div>
+      </div>
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-label">Primes</div>
+          <div class="metric-value metric-placeholder" id="lim-primes">—</div>
+          <div class="metric-unit">ms</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Fibonacci</div>
+          <div class="metric-value metric-placeholder" id="lim-fib">—</div>
+          <div class="metric-unit">ms</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Matrix</div>
+          <div class="metric-value metric-placeholder" id="lim-matrix">—</div>
+          <div class="metric-unit">ms</div>
+        </div>
+      </div>
+      <div class="total-metric">
+        <div class="total-label">Total Elapsed</div>
+        <div>
+          <div class="total-value" id="lim-total">—</div>
+          <div class="metric-unit">milliseconds</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card unlimited">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Pod B</div>
+          <div class="card-label">CPU Unlimited</div>
+        </div>
+        <div class="card-badge">No limits set</div>
+      </div>
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-label">Primes</div>
+          <div class="metric-value metric-placeholder" id="unlim-primes">—</div>
+          <div class="metric-unit">ms</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Fibonacci</div>
+          <div class="metric-value metric-placeholder" id="unlim-fib">—</div>
+          <div class="metric-unit">ms</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Matrix</div>
+          <div class="metric-value metric-placeholder" id="unlim-matrix">—</div>
+          <div class="metric-unit">ms</div>
+        </div>
+      </div>
+      <div class="total-metric">
+        <div class="total-label">Total Elapsed</div>
+        <div>
+          <div class="total-value" id="unlim-total">—</div>
+          <div class="metric-unit">milliseconds</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Comparison Bars -->
+  <div class="comparison-section">
+    <div class="section-title">Task-by-Task Comparison</div>
+
+    <div class="compare-row">
+      <div class="compare-label">Primes</div>
+      <div class="bar-track">
+        <div class="bar-fill limited" id="bar-lim-primes" style="width:0%">—</div>
+      </div>
+      <div class="bar-track">
+        <div class="bar-fill unlimited" id="bar-unlim-primes" style="width:0%">—</div>
+      </div>
+      <div class="speedup-badge" id="speedup-primes" style="color:var(--muted)">—</div>
+    </div>
+
+    <div class="compare-row">
+      <div class="compare-label">Fibonacci</div>
+      <div class="bar-track">
+        <div class="bar-fill limited" id="bar-lim-fib" style="width:0%">—</div>
+      </div>
+      <div class="bar-track">
+        <div class="bar-fill unlimited" id="bar-unlim-fib" style="width:0%">—</div>
+      </div>
+      <div class="speedup-badge" id="speedup-fib" style="color:var(--muted)">—</div>
+    </div>
+
+    <div class="compare-row">
+      <div class="compare-label">Matrix</div>
+      <div class="bar-track">
+        <div class="bar-fill limited" id="bar-lim-matrix" style="width:0%">—</div>
+      </div>
+      <div class="bar-track">
+        <div class="bar-fill unlimited" id="bar-unlim-matrix" style="width:0%">—</div>
+      </div>
+      <div class="speedup-badge" id="speedup-matrix" style="color:var(--muted)">—</div>
+    </div>
+
+    <div class="compare-row">
+      <div class="compare-label" style="color:var(--text);font-weight:bold">TOTAL</div>
+      <div class="bar-track">
+        <div class="bar-fill limited" id="bar-lim-total" style="width:0%">—</div>
+      </div>
+      <div class="bar-track">
+        <div class="bar-fill unlimited" id="bar-unlim-total" style="width:0%">—</div>
+      </div>
+      <div class="speedup-badge" id="speedup-total" style="color:var(--accent);font-size:16px">—</div>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="chart-section">
+    <div class="section-title">Historical Total Time (ms)</div>
+    <div class="chart-container">
+      <canvas id="history-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="log-section">
+    <div class="section-title">Run Log</div>
+    <div class="log-entries" id="log-entries">
+      <div class="log-entry">
+        <span class="log-time">READY</span>
+        <span class="log-msg">System online. Click "Run Benchmark" to start comparison.</span>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Loading overlay -->
+<div class="loading-overlay" id="loading">
+  <div class="loading-box">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">BENCHMARKING...</div>
+    <div class="loading-sub">Running CPU-intensive tasks on both pods</div>
+  </div>
+</div>
+
+<script>
+const socket = io();
+let runCount = 0;
+const historyLimited = [];
+const historyUnlimited = [];
+const historyLabels = [];
+
+// Chart
+const ctx = document.getElementById('history-chart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: historyLabels,
+    datasets: [
+      {
+        label: 'CPU Limited (100m)',
+        data: historyLimited,
+        borderColor: '#ff4757',
+        backgroundColor: 'rgba(255,71,87,0.1)',
+        fill: true,
+        tension: 0.4,
+        pointBackgroundColor: '#ff4757',
+        pointRadius: 5,
+      },
+      {
+        label: 'CPU Unlimited',
+        data: historyUnlimited,
+        borderColor: '#2ed573',
+        backgroundColor: 'rgba(46,213,115,0.1)',
+        fill: true,
+        tension: 0.4,
+        pointBackgroundColor: '#2ed573',
+        pointRadius: 5,
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        labels: { color: '#8b949e', font: { family: 'Share Tech Mono', size: 12 } }
+      }
+    },
+    scales: {
+      x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
+      y: {
+        ticks: { color: '#8b949e', callback: v => v + ' ms' },
+        grid: { color: '#21262d' }
+      }
+    }
+  }
+});
+
+function addLog(msg, type = 'info') {
+  const now = new Date().toLocaleTimeString('zh-TW', {hour12: false});
+  const el = document.getElementById('log-entries');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `<span class="log-time">${now}</span><span class="log-msg">${msg}</span>`;
+  el.insertBefore(entry, el.firstChild);
+}
+
+function runBenchmark() {
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  document.getElementById('loading').classList.add('active');
+  addLog('Benchmark started — running primes, fibonacci, matrix on both pods...');
+  socket.emit('run_benchmark');
+}
+
+socket.on('benchmark_result', (data) => {
+  document.getElementById('loading').classList.remove('active');
+  document.getElementById('run-btn').disabled = false;
+
+  const { limited, unlimited } = data;
+  runCount++;
+  document.getElementById('run-count').textContent = `Run #${runCount}`;
+
+  if (limited.error || unlimited.error) {
+    addLog(`ERROR: ${limited.error || unlimited.error}`, 'error');
+    return;
+  }
+
+  // Update cards
+  const lb = limited.benchmarks;
+  const ub = unlimited.benchmarks;
+
+  document.getElementById('lim-primes').textContent = lb.primes.elapsed_ms;
+  document.getElementById('lim-fib').textContent = lb.fibonacci.elapsed_ms;
+  document.getElementById('lim-matrix').textContent = lb.matrix.elapsed_ms;
+  document.getElementById('lim-total').textContent = limited.total_elapsed_ms;
+
+  document.getElementById('unlim-primes').textContent = ub.primes.elapsed_ms;
+  document.getElementById('unlim-fib').textContent = ub.fibonacci.elapsed_ms;
+  document.getElementById('unlim-matrix').textContent = ub.matrix.elapsed_ms;
+  document.getElementById('unlim-total').textContent = unlimited.total_elapsed_ms;
+
+  // Remove placeholder class
+  document.querySelectorAll('.metric-value').forEach(el => el.classList.remove('metric-placeholder'));
+
+  // Update comparison bars
+  const tasks = [
+    { key: 'primes', limVal: lb.primes.elapsed_ms, unlimVal: ub.primes.elapsed_ms },
+    { key: 'fib', limVal: lb.fibonacci.elapsed_ms, unlimVal: ub.fibonacci.elapsed_ms },
+    { key: 'matrix', limVal: lb.matrix.elapsed_ms, unlimVal: ub.matrix.elapsed_ms },
+    { key: 'total', limVal: limited.total_elapsed_ms, unlimVal: unlimited.total_elapsed_ms },
+  ];
+
+  tasks.forEach(({ key, limVal, unlimVal }) => {
+    const maxVal = Math.max(limVal, unlimVal);
+    const limPct = Math.round((limVal / maxVal) * 100);
+    const unlimPct = Math.round((unlimVal / maxVal) * 100);
+    const speedup = (limVal / unlimVal).toFixed(2);
+
+    const barLim = document.getElementById(`bar-lim-${key}`);
+    const barUnlim = document.getElementById(`bar-unlim-${key}`);
+    const speedupEl = document.getElementById(`speedup-${key}`);
+
+    barLim.style.width = limPct + '%';
+    barLim.textContent = limVal + ' ms';
+    barUnlim.style.width = unlimPct + '%';
+    barUnlim.textContent = unlimVal + ' ms';
+    speedupEl.textContent = speedup + 'x';
+    speedupEl.style.color = speedup > 1.5 ? '#ffa502' : '#2ed573';
+  });
+
+  // Update chart
+  historyLabels.push(`#${runCount}`);
+  historyLimited.push(limited.total_elapsed_ms);
+  historyUnlimited.push(unlimited.total_elapsed_ms);
+  if (historyLabels.length > 10) {
+    historyLabels.shift();
+    historyLimited.shift();
+    historyUnlimited.shift();
+  }
+  chart.update();
+
+  const speedup = (limited.total_elapsed_ms / unlimited.total_elapsed_ms).toFixed(2);
+  addLog(`Run #${runCount} complete — Limited: ${limited.total_elapsed_ms}ms | Unlimited: ${unlimited.total_elapsed_ms}ms | Speedup: ${speedup}x`);
+});
+
+socket.on('connect', () => {
+  document.getElementById('connection-status').textContent = 'CONNECTED';
+});
+
+socket.on('disconnect', () => {
+  document.getElementById('connection-status').textContent = 'DISCONNECTED';
+});
+</script>
+</body>
+</html>

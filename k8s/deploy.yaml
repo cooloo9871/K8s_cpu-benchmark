@@ -1,0 +1,211 @@
+---
+# ============================================================
+# Namespace
+# ============================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cpu-bench
+  labels:
+    app.kubernetes.io/name: cpu-bench
+
+---
+# ============================================================
+# Worker A: CPU Limited (100m)
+# 100m = 0.1 core — very low, will be heavily throttled
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-limited
+  namespace: cpu-bench
+  labels:
+    app: worker-limited
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker-limited
+  template:
+    metadata:
+      labels:
+        app: worker-limited
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/YOUR_ORG/cpu-bench-worker:latest
+          # ---- or use local image for minikube: ----
+          # image: cpu-bench-worker:local
+          # imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HAS_CPU_LIMIT
+              value: "true"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "100m"      # <-- THE KEY CONSTRAINT: throttled to 0.1 core
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-limited
+  namespace: cpu-bench
+spec:
+  selector:
+    app: worker-limited
+  ports:
+    - port: 8080
+      targetPort: 8080
+
+---
+# ============================================================
+# Worker B: CPU Unlimited (No limits.cpu set)
+# Can burst to use all available node CPU
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-unlimited
+  namespace: cpu-bench
+  labels:
+    app: worker-unlimited
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker-unlimited
+  template:
+    metadata:
+      labels:
+        app: worker-unlimited
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/YOUR_ORG/cpu-bench-worker:latest
+          # ---- or use local image for minikube: ----
+          # image: cpu-bench-worker:local
+          # imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HAS_CPU_LIMIT
+              value: "false"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            # limits: intentionally NOT set — no CPU throttling
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-unlimited
+  namespace: cpu-bench
+spec:
+  selector:
+    app: worker-unlimited
+  ports:
+    - port: 8080
+      targetPort: 8080
+
+---
+# ============================================================
+# Dashboard
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: cpu-bench
+  labels:
+    app: dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dashboard
+  template:
+    metadata:
+      labels:
+        app: dashboard
+    spec:
+      containers:
+        - name: dashboard
+          image: ghcr.io/YOUR_ORG/cpu-bench-dashboard:latest
+          # ---- or use local image for minikube: ----
+          # image: cpu-bench-dashboard:local
+          # imagePullPolicy: Never
+          ports:
+            - containerPort: 3000
+          env:
+            - name: WORKER_LIMITED_URL
+              value: "http://worker-limited.cpu-bench.svc.cluster.local:8080"
+            - name: WORKER_UNLIMITED_URL
+              value: "http://worker-unlimited.cpu-bench.svc.cluster.local:8080"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 8
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  namespace: cpu-bench
+spec:
+  selector:
+    app: dashboard
+  type: NodePort
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 30080

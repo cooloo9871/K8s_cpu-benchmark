@@ -1,0 +1,219 @@
+---
+# ============================================================
+# cpu-bench — 使用自建 Image 版本
+#
+# 部署前請先 build & push image：
+#   podman build -t YOUR_REGISTRY/cpu-bench-worker:latest ./worker
+#   podman build -t YOUR_REGISTRY/cpu-bench-dashboard:latest ./dashboard
+#   podman push YOUR_REGISTRY/cpu-bench-worker:latest
+#   podman push YOUR_REGISTRY/cpu-bench-dashboard:latest
+#
+# 然後將下方所有 YOUR_REGISTRY 替換成你的 registry 路徑
+#
+# 部署：
+#   kubectl apply -f deploy-image.yaml
+#
+# 開啟 Dashboard：
+#   kubectl port-forward svc/dashboard 3000:3000 -n cpu-bench
+#   → http://localhost:3000
+#
+# 清除：
+#   kubectl delete namespace cpu-bench
+# ============================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cpu-bench
+
+---
+# ============================================================
+# Worker A: CPU Limited (100m)
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-limited
+  namespace: cpu-bench
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker-limited
+  template:
+    metadata:
+      labels:
+        app: worker-limited
+    spec:
+      containers:
+        - name: worker
+          image: YOUR_REGISTRY/cpu-bench-worker:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HAS_CPU_LIMIT
+              value: "true"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "100m"        # ← throttled to 0.1 core
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-limited
+  namespace: cpu-bench
+spec:
+  selector:
+    app: worker-limited
+  ports:
+    - port: 8080
+      targetPort: 8080
+
+---
+# ============================================================
+# Worker B: CPU Unlimited
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-unlimited
+  namespace: cpu-bench
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker-unlimited
+  template:
+    metadata:
+      labels:
+        app: worker-unlimited
+    spec:
+      containers:
+        - name: worker
+          image: YOUR_REGISTRY/cpu-bench-worker:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HAS_CPU_LIMIT
+              value: "false"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            # limits: 刻意不設定，讓 Pod 自由使用 CPU
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-unlimited
+  namespace: cpu-bench
+spec:
+  selector:
+    app: worker-unlimited
+  ports:
+    - port: 8080
+      targetPort: 8080
+
+---
+# ============================================================
+# Dashboard
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: cpu-bench
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dashboard
+  template:
+    metadata:
+      labels:
+        app: dashboard
+    spec:
+      containers:
+        - name: dashboard
+          image: YOUR_REGISTRY/cpu-bench-dashboard:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          env:
+            - name: WORKER_LIMITED_URL
+              value: "http://worker-limited:8080"
+            - name: WORKER_UNLIMITED_URL
+              value: "http://worker-unlimited:8080"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  namespace: cpu-bench
+spec:
+  selector:
+    app: dashboard
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: 3000
