@@ -1,6 +1,6 @@
 # K8s CPU Throttle Benchmark
 
-> 透過 3 種 CPU 密集運算，即時對比 **CPU Limited vs Unlimited** 的執行時間差異。
+> 透過遞迴費氏數列計算，即時對比 **CPU Limited vs Unlimited** 的執行時間差異。
 
 ## 專案結構
 
@@ -69,10 +69,10 @@ Worker 同時部署兩個實例（limited / unlimited），各自提供相同 en
 |--------|------|------|
 | GET | `/health` | 健康檢查，回傳 pod 名稱 |
 | GET | `/info` | Pod 資訊與 CPU limit 狀態 |
-| GET | `/bench/primes` | 計算 50,000 以內質數 |
-| GET | `/bench/fibonacci` | 遞迴計算 fibonacci(36) |
-| GET | `/bench/matrix` | 200×200 矩陣相乘 |
-| GET | `/bench/all` | 依序執行全部三項，回傳總時間 |
+| GET | `/bench/primes` | 計算 50,000 以內質數（單獨測試用） |
+| GET | `/bench/fibonacci` | 遞迴計算 fibonacci(36)（單獨測試用） |
+| GET | `/bench/matrix` | 200×200 矩陣相乘（單獨測試用） |
+| GET | `/bench/all` | 執行費氏數列壓測，回傳執行時間 |
 | GET | `/bench/threads` | 1 執行緒 vs 4 執行緒並行 numpy 矩陣乘法（500×500 ×8），回傳加速比 |
 
 ## Dashboard 實作說明
@@ -124,14 +124,40 @@ kubectl port-forward --address <your ip address> svc/dashboard 3000:3000 -n cpu-
 
 ## 壓測項目說明
 
-| 任務 | 內容 | CPU 特性 |
-|------|------|----------|
-| **質數計算**（Dashboard：Primes） | 計算 50,000 以內的質數 | 持續迴圈運算，最能展示 throttle |
-| **費氏數列**（Dashboard：Fibonacci） | 遞迴計算 fibonacci(36) | 指數級呼叫堆疊，瞬間大量 CPU |
-| **矩陣乘法**（Dashboard：Matrix） | 200×200 矩陣相乘 | 密集浮點數運算 |
-| **多執行緒比較**（Dashboard：Thread Benchmark） | numpy 500×500 矩陣乘法 ×8（1 條 vs 4 條執行緒） | 展示 CPU throttle 如何吃掉多核並行優勢 |
+### 單執行緒壓測：費氏數列
 
-### 多執行緒測試說明
+Dashboard 主壓測使用遞迴費氏數列（`fibonacci(36)`）作為唯一的單執行緒計算任務。
+
+#### 為什麼選擇費氏數列？
+
+費氏數列是 CPU throttle 壓測的理想選擇，原因如下：
+
+**1. 純 CPU 運算，零 I/O 干擾**
+遞迴費氏數列完全在 CPU 暫存器與呼叫堆疊上執行，不涉及記憶體大量分配、磁碟或網路 I/O。任何執行時間的變化都直接反映 CPU 可用量，不會被其他瓶頸稀釋。
+
+**2. 指數級呼叫堆疊，持續佔用 CPU 時間片**
+`fibonacci(36)` 展開後共需約 **2,900 萬次**函式呼叫。這段連續的 CPU 需求會跨越多個 CFS 調度週期（每週期 100ms），使 throttle 效果得以完整重複累積——每次被暫停都是真實的等待時間。
+
+```
+fibonacci(36) 呼叫次數 ≈ 2 × fib(37) - 1 ≈ 29,000,000 次
+```
+
+**3. 無法向量化、無法平行化，GIL 無法繞過**
+純 Python 遞迴無法被 BLAS、numpy 或 JIT 等外部加速，每一次呼叫都必須持有 Python GIL。這確保測試結果完全反映單一 Python 執行緒受到的 CPU 配額限制，不受多核心加速干擾。
+
+**4. 執行時間適中，差異倍數顯著**
+在 100m CPU 限制下，執行時間約為無限制的 8～12 倍，差異清晰易讀且不會讓使用者等待過久。
+
+**對比其他常見選項：**
+
+| 計算方式 | 純 CPU | 無向量化風險 | 呼叫連續性 | 適合展示 throttle |
+|---------|--------|-------------|-----------|-----------------|
+| 遞迴費氏數列 | ✅ | ✅ | ✅ 持續累積 | ✅ 最佳 |
+| 質數計算 | ✅ | ✅ | 尚可 | 良好 |
+| 矩陣乘法（純 Python）| ✅ | ✅ | 尚可 | 良好 |
+| numpy 矩陣乘法 | ✅ | ❌ BLAS 多執行緒 | — | 不穩定 |
+
+### 多執行緒壓測
 
 使用 Python `ThreadPoolExecutor`（4 條執行緒）並行執行 8 次 numpy 500×500 矩陣乘法，對比單一執行緒的執行時間。
 
@@ -143,6 +169,15 @@ kubectl port-forward --address <your ip address> svc/dashboard 3000:3000 -n cpu-
 | CPU Limited | ~Xms | ~Xms | ~1x | throttle 吃掉所有並行優勢 |
 
 > **結論**：CPU limit 下，增加執行緒數無法提升效能，因為 container 的 CPU 時間預算是固定的。
+
+### NUMA 記憶體頻寬測試
+
+使用 128 MB float64 陣列進行連續讀取（`np.sum`），透過 `os.sched_setaffinity` 將執行緒分別綁定到不同 NUMA node 的 CPU，量測本地存取與跨 node 存取的頻寬差異。
+
+| 模式 | 說明 |
+|------|------|
+| `cross_numa` | 記憶體分配在 Node A，分別由 Node A / Node B CPU 存取，展示跨 node 延遲 |
+| `single_numa` | 僅有單一 NUMA node 時，改為 1 執行緒 vs N 執行緒頻寬擴展測試 |
 
 ## 調整 CPU Limit
 
@@ -185,9 +220,6 @@ kubectl delete -f k8s/deploy.yaml
 
 | 測試項目 | Limited | Unlimited | 差異倍數 |
 |---------|---------|-----------|---------|
-| 質數計算 | ~3000ms | ~300ms | ~10x |
-| 費氏數列 | ~2000ms | ~200ms | ~10x |
-| 矩陣乘法 | ~5000ms | ~500ms | ~10x |
-| **總計** | **~10s** | **~1s** | **~10x** |
+| **費氏數列** | **~2000ms** | **~200ms** | **~10x** |
 
 > 實際數字依節點 CPU 規格和當前負載而有所不同。

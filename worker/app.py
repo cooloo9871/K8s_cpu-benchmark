@@ -149,39 +149,20 @@ def bench_matrix():
 @app.route("/bench/all")
 def bench_all():
     results = {}
-    total_start = time.perf_counter()
 
-    # Primes
     start = time.perf_counter()
-    prime_count = count_primes(50000)
-    results["primes"] = {
-        "elapsed_ms": round((time.perf_counter() - start) * 1000, 2),
-        "description": "Count primes up to 50,000"
-    }
-
-    # Fibonacci
-    start = time.perf_counter()
-    fib = fibonacci(36)
+    fibonacci(36)
+    fib_ms = round((time.perf_counter() - start) * 1000, 2)
     results["fibonacci"] = {
-        "elapsed_ms": round((time.perf_counter() - start) * 1000, 2),
+        "elapsed_ms": fib_ms,
         "description": "Recursive fibonacci(36)"
     }
-
-    # Matrix
-    start = time.perf_counter()
-    matrix_multiply(200)
-    results["matrix"] = {
-        "elapsed_ms": round((time.perf_counter() - start) * 1000, 2),
-        "description": "200x200 matrix multiplication"
-    }
-
-    total_elapsed = time.perf_counter() - total_start
 
     return jsonify({
         "pod_name": POD_NAME,
         "has_cpu_limit": HAS_LIMIT,
         "cpu_limit": get_cpu_limit_str(),
-        "total_elapsed_ms": round(total_elapsed * 1000, 2),
+        "total_elapsed_ms": fib_ms,
         "benchmarks": results,
         "timestamp": datetime.utcnow().isoformat()
     })

@@ -543,25 +543,8 @@
       </div>
       <div class="metrics">
         <div class="metric">
-          <div class="metric-label">質數計算</div>
-          <div class="metric-value metric-placeholder" id="lim-primes">—</div>
-          <div class="metric-unit">毫秒</div>
-        </div>
-        <div class="metric">
           <div class="metric-label">費氏數列</div>
           <div class="metric-value metric-placeholder" id="lim-fib">—</div>
-          <div class="metric-unit">毫秒</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">矩陣乘法</div>
-          <div class="metric-value metric-placeholder" id="lim-matrix">—</div>
-          <div class="metric-unit">毫秒</div>
-        </div>
-      </div>
-      <div class="total-metric">
-        <div class="total-label">總執行時間</div>
-        <div>
-          <div class="total-value" id="lim-total">—</div>
           <div class="metric-unit">毫秒</div>
         </div>
       </div>
@@ -577,25 +560,8 @@
       </div>
       <div class="metrics">
         <div class="metric">
-          <div class="metric-label">質數計算</div>
-          <div class="metric-value metric-placeholder" id="unlim-primes">—</div>
-          <div class="metric-unit">毫秒</div>
-        </div>
-        <div class="metric">
           <div class="metric-label">費氏數列</div>
           <div class="metric-value metric-placeholder" id="unlim-fib">—</div>
-          <div class="metric-unit">毫秒</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">矩陣乘法</div>
-          <div class="metric-value metric-placeholder" id="unlim-matrix">—</div>
-          <div class="metric-unit">毫秒</div>
-        </div>
-      </div>
-      <div class="total-metric">
-        <div class="total-label">總執行時間</div>
-        <div>
-          <div class="total-value" id="unlim-total">—</div>
           <div class="metric-unit">毫秒</div>
         </div>
       </div>
@@ -604,18 +570,7 @@
 
   <!-- Comparison Bars -->
   <div class="comparison-section">
-    <div class="section-title">各任務執行時間對比</div>
-
-    <div class="compare-row">
-      <div class="compare-label">質數計算</div>
-      <div class="bar-track">
-        <div class="bar-fill limited" id="bar-lim-primes" style="width:0%">—</div>
-      </div>
-      <div class="bar-track">
-        <div class="bar-fill unlimited" id="bar-unlim-primes" style="width:0%">—</div>
-      </div>
-      <div class="speedup-badge" id="speedup-primes" style="color:var(--muted)">—</div>
-    </div>
+    <div class="section-title">費氏數列執行時間對比</div>
 
     <div class="compare-row">
       <div class="compare-label">費氏數列</div>
@@ -625,29 +580,7 @@
       <div class="bar-track">
         <div class="bar-fill unlimited" id="bar-unlim-fib" style="width:0%">—</div>
       </div>
-      <div class="speedup-badge" id="speedup-fib" style="color:var(--muted)">—</div>
-    </div>
-
-    <div class="compare-row">
-      <div class="compare-label">矩陣乘法</div>
-      <div class="bar-track">
-        <div class="bar-fill limited" id="bar-lim-matrix" style="width:0%">—</div>
-      </div>
-      <div class="bar-track">
-        <div class="bar-fill unlimited" id="bar-unlim-matrix" style="width:0%">—</div>
-      </div>
-      <div class="speedup-badge" id="speedup-matrix" style="color:var(--muted)">—</div>
-    </div>
-
-    <div class="compare-row">
-      <div class="compare-label" style="color:var(--text);font-weight:bold">總計</div>
-      <div class="bar-track">
-        <div class="bar-fill limited" id="bar-lim-total" style="width:0%">—</div>
-      </div>
-      <div class="bar-track">
-        <div class="bar-fill unlimited" id="bar-unlim-total" style="width:0%">—</div>
-      </div>
-      <div class="speedup-badge" id="speedup-total" style="color:var(--accent);font-size:24px">—</div>
+      <div class="speedup-badge" id="speedup-fib" style="color:var(--accent);font-size:24px">—</div>
     </div>
   </div>
 
@@ -857,7 +790,7 @@ function runBenchmark() {
   const btn = document.getElementById('run-btn');
   btn.disabled = true;
   document.getElementById('loading').classList.add('active');
-  addLog('壓測開始 — 正在兩個 Pod 上執行質數計算、費氏數列、矩陣乘法...');
+  addLog('壓測開始 — 正在兩個 Pod 上執行費氏數列...');
   socket.emit('run_benchmark');
 }
 
@@ -882,47 +815,26 @@ socket.on('benchmark_result', (data) => {
   document.getElementById('lim-pod').textContent = limited.pod_name || 'Pod A';
   document.getElementById('unlim-pod').textContent = unlimited.pod_name || 'Pod B';
   updateBadges(limited, unlimited);
-  document.getElementById('lim-primes').textContent = lb.primes.elapsed_ms;
   document.getElementById('lim-fib').textContent = lb.fibonacci.elapsed_ms;
-  document.getElementById('lim-matrix').textContent = lb.matrix.elapsed_ms;
-  document.getElementById('lim-total').textContent = limited.total_elapsed_ms;
-
-  document.getElementById('unlim-primes').textContent = ub.primes.elapsed_ms;
   document.getElementById('unlim-fib').textContent = ub.fibonacci.elapsed_ms;
-  document.getElementById('unlim-matrix').textContent = ub.matrix.elapsed_ms;
-  document.getElementById('unlim-total').textContent = unlimited.total_elapsed_ms;
 
-  // Remove placeholder class from main benchmark cards only
-  ['lim-primes','lim-fib','lim-matrix','lim-total','unlim-primes','unlim-fib','unlim-matrix','unlim-total'].forEach(id => {
+  ['lim-fib', 'unlim-fib'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.remove('metric-placeholder');
   });
 
-  // Update comparison bars
-  const tasks = [
-    { key: 'primes', limVal: lb.primes.elapsed_ms, unlimVal: ub.primes.elapsed_ms },
-    { key: 'fib', limVal: lb.fibonacci.elapsed_ms, unlimVal: ub.fibonacci.elapsed_ms },
-    { key: 'matrix', limVal: lb.matrix.elapsed_ms, unlimVal: ub.matrix.elapsed_ms },
-    { key: 'total', limVal: limited.total_elapsed_ms, unlimVal: unlimited.total_elapsed_ms },
-  ];
-
-  tasks.forEach(({ key, limVal, unlimVal }) => {
-    const maxVal = Math.max(limVal, unlimVal);
-    const limPct = Math.round((limVal / maxVal) * 100);
-    const unlimPct = Math.round((unlimVal / maxVal) * 100);
-    const ratio = limVal / unlimVal;
-
-    const barLim = document.getElementById(`bar-lim-${key}`);
-    const barUnlim = document.getElementById(`bar-unlim-${key}`);
-    const speedupEl = document.getElementById(`speedup-${key}`);
-
-    barLim.style.width = limPct + '%';
-    barLim.textContent = limVal + ' ms';
-    barUnlim.style.width = unlimPct + '%';
-    barUnlim.textContent = unlimVal + ' ms';
-    speedupEl.textContent = fmtSpeedup(ratio);
-    speedupEl.style.color = ratio >= 3 ? '#ff4757' : ratio >= 1.5 ? '#ffa502' : '#2ed573';
-  });
+  // Update comparison bar
+  const fibLim = lb.fibonacci.elapsed_ms;
+  const fibUnlim = ub.fibonacci.elapsed_ms;
+  const maxVal = Math.max(fibLim, fibUnlim);
+  document.getElementById('bar-lim-fib').style.width = Math.round(fibLim / maxVal * 100) + '%';
+  document.getElementById('bar-lim-fib').textContent = fibLim + ' ms';
+  document.getElementById('bar-unlim-fib').style.width = Math.round(fibUnlim / maxVal * 100) + '%';
+  document.getElementById('bar-unlim-fib').textContent = fibUnlim + ' ms';
+  const fibRatio = fibLim / fibUnlim;
+  const speedupEl = document.getElementById('speedup-fib');
+  speedupEl.textContent = fmtSpeedup(fibRatio);
+  speedupEl.style.color = fibRatio >= 3 ? '#ff4757' : fibRatio >= 1.5 ? '#ffa502' : '#2ed573';
 
   // Update chart
   historyLabels.push(`#${runCount}`);
@@ -935,7 +847,7 @@ socket.on('benchmark_result', (data) => {
   }
   chart.update();
 
-  addLog(`第 ${runCount} 次完成 — 受限：${limited.total_elapsed_ms} 毫秒 | 無限制：${unlimited.total_elapsed_ms} 毫秒 | 受限${fmtSpeedup(limited.total_elapsed_ms / unlimited.total_elapsed_ms)}`);
+  addLog(`第 ${runCount} 次完成 — 費氏數列 受限：${fibLim} 毫秒 | 無限制：${fibUnlim} 毫秒 | 受限${fmtSpeedup(fibRatio)}`);
 });
 
 socket.on('connect', () => {

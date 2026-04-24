@@ -144,10 +144,7 @@
         <div class="badge" id="lim-badge">讀取中...</div>
       </div>
       <div class="metrics">
-        <div class="metric"><div class="m-label">質數計算</div><div class="m-value ph" id="lp">—</div><div class="m-unit">毫秒</div></div>
         <div class="metric"><div class="m-label">費氏數列</div><div class="m-value ph" id="lf">—</div><div class="m-unit">毫秒</div></div>
-        <div class="metric"><div class="m-label">矩陣乘法</div><div class="m-value ph" id="lm">—</div><div class="m-unit">毫秒</div></div>
-        <div class="total-row"><div class="t-label">總執行時間</div><div><div class="t-value" id="lt">—</div><div class="m-unit">毫秒</div></div></div>
       </div>
     </div>
     <div class="card unlim">
@@ -156,39 +153,18 @@
         <div class="badge" id="unlim-badge">讀取中...</div>
       </div>
       <div class="metrics">
-        <div class="metric"><div class="m-label">質數計算</div><div class="m-value ph" id="up">—</div><div class="m-unit">毫秒</div></div>
         <div class="metric"><div class="m-label">費氏數列</div><div class="m-value ph" id="uf">—</div><div class="m-unit">毫秒</div></div>
-        <div class="metric"><div class="m-label">矩陣乘法</div><div class="m-value ph" id="um">—</div><div class="m-unit">毫秒</div></div>
-        <div class="total-row"><div class="t-label">總執行時間</div><div><div class="t-value" id="ut">—</div><div class="m-unit">毫秒</div></div></div>
       </div>
     </div>
   </div>
 
   <section>
-    <div class="sec-title">各任務執行時間對比</div>
-    <div class="cmp-grid">
-      <div class="cmp-label">質數計算</div>
-      <div class="bar-track"><div class="bar-fill lim" id="blp" style="width:0%">—</div></div>
-      <div class="bar-track"><div class="bar-fill unlim" id="bup" style="width:0%">—</div></div>
-      <div class="spdup-wrap"><div class="spdup-badge spdup-neutral" id="sp"><div class="spdup-num">—</div><div class="spdup-label">待測試</div></div></div>
-    </div>
+    <div class="sec-title">費氏數列執行時間對比</div>
     <div class="cmp-grid">
       <div class="cmp-label">費氏數列</div>
       <div class="bar-track"><div class="bar-fill lim" id="blf" style="width:0%">—</div></div>
       <div class="bar-track"><div class="bar-fill unlim" id="buf" style="width:0%">—</div></div>
-      <div class="spdup-wrap"><div class="spdup-badge spdup-neutral" id="sf"><div class="spdup-num">—</div><div class="spdup-label">待測試</div></div></div>
-    </div>
-    <div class="cmp-grid">
-      <div class="cmp-label">矩陣乘法</div>
-      <div class="bar-track"><div class="bar-fill lim" id="blm" style="width:0%">—</div></div>
-      <div class="bar-track"><div class="bar-fill unlim" id="bum" style="width:0%">—</div></div>
-      <div class="spdup-wrap"><div class="spdup-badge spdup-neutral" id="sm"><div class="spdup-num">—</div><div class="spdup-label">待測試</div></div></div>
-    </div>
-    <div class="cmp-grid" style="margin-top:12px;border-top:1px solid var(--border);padding-top:16px">
-      <div class="cmp-label" style="color:var(--text);font-size:15px">總計</div>
-      <div class="bar-track" style="height:48px"><div class="bar-fill lim" id="blt" style="width:0%">—</div></div>
-      <div class="bar-track" style="height:48px"><div class="bar-fill unlim" id="but" style="width:0%">—</div></div>
-      <div class="spdup-wrap"><div class="spdup-badge spdup-neutral spdup-total" id="st"><div class="spdup-num">—</div><div class="spdup-label">待測試</div></div></div>
+      <div class="spdup-wrap"><div class="spdup-badge spdup-neutral spdup-total" id="sf"><div class="spdup-num">—</div><div class="spdup-label">待測試</div></div></div>
     </div>
   </section>
 
@@ -500,7 +476,7 @@ async function runNumaBench() {
 async function runBench(){
   document.getElementById('runBtn').disabled=true;
   document.getElementById('overlay').classList.add('on');
-  log('壓測開始 — 正在兩個 Pod 上執行...');
+  log('壓測開始 — 正在兩個 Pod 上執行費氏數列...');
   try{
     const res=await fetch('/api/bench');
     const d=await res.json();
@@ -512,23 +488,14 @@ async function runBench(){
     document.getElementById('lpod').textContent=L.pod_name||'Pod A';
     document.getElementById('upod').textContent=U.pod_name||'Pod B';
     updateBadges(L,U);
-    document.getElementById('lp').textContent=lb.primes.elapsed_ms;
     document.getElementById('lf').textContent=lb.fibonacci.elapsed_ms;
-    document.getElementById('lm').textContent=lb.matrix.elapsed_ms;
-    document.getElementById('lt').textContent=L.total_elapsed_ms;
-    document.getElementById('up').textContent=ub.primes.elapsed_ms;
     document.getElementById('uf').textContent=ub.fibonacci.elapsed_ms;
-    document.getElementById('um').textContent=ub.matrix.elapsed_ms;
-    document.getElementById('ut').textContent=U.total_elapsed_ms;
-    ['lp','lf','lm','lt','up','uf','um','ut'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('ph');});
-    setBar('blp','bup','sp',lb.primes.elapsed_ms,ub.primes.elapsed_ms);
-    setBar('blf','buf','sf',lb.fibonacci.elapsed_ms,ub.fibonacci.elapsed_ms);
-    setBar('blm','bum','sm',lb.matrix.elapsed_ms,ub.matrix.elapsed_ms);
-    setBar('blt','but','st',L.total_elapsed_ms,U.total_elapsed_ms,true);
+    ['lf','uf'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('ph');});
+    setBar('blf','buf','sf',lb.fibonacci.elapsed_ms,ub.fibonacci.elapsed_ms,true);
     histLbls.push('#'+runN);histL.push(L.total_elapsed_ms);histU.push(U.total_elapsed_ms);
     if(histLbls.length>10){histLbls.shift();histL.shift();histU.shift();}
     chart.update();
-    log(`第 ${runN} 次完成 — 受限：${L.total_elapsed_ms} 毫秒 | 無限制：${U.total_elapsed_ms} 毫秒 | 受限${fmtSpeedup(L.total_elapsed_ms/U.total_elapsed_ms)}`);
+    log(`第 ${runN} 次完成 — 費氏數列 受限：${lb.fibonacci.elapsed_ms} 毫秒 | 無限制：${ub.fibonacci.elapsed_ms} 毫秒 | 受限${fmtSpeedup(lb.fibonacci.elapsed_ms/ub.fibonacci.elapsed_ms)}`);
   }catch(e){log('FETCH ERROR: '+e.message);}
   finally{document.getElementById('overlay').classList.remove('on');document.getElementById('runBtn').disabled=false;}
 }
