@@ -32,7 +32,7 @@ spec:
         app: worker-limited
     spec:
       containers:
-        - name: worker
+        - name: worker-limited
           image: quay.io/cooloo9871/cpu-bench-worker:latest
           ports:
             - containerPort: 8080
@@ -99,7 +99,7 @@ spec:
         app: worker-unlimited
     spec:
       containers:
-        - name: worker
+        - name: worker-unlimited
           image: quay.io/cooloo9871/cpu-bench-worker:latest
           ports:
             - containerPort: 8080
