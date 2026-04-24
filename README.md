@@ -47,7 +47,7 @@ CPU Limit = 100m = 0.1 core
                 ┌─────────────────────────────────┐
                 │       Namespace: cpu-bench       │
                 │                                  │
-  Browser ──────┤───────→ dashboard :3000          │
+  Browser ──────┤─→ dashboard :3000(NodePort 30080)│
                 │       │              │           │
                 │       ↓              ↓           │
                 │  worker-limited  worker-unlimited │
