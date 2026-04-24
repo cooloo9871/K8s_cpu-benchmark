@@ -252,16 +252,19 @@
 
   /* Metrics */
   .metrics {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
 
   .metric {
     background: var(--surface2);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 14px;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
   }
 
   .metric-label {
@@ -269,8 +272,12 @@
     font-size: 17px;
     color: var(--muted);
     letter-spacing: 0.1em;
-    margin-bottom: 6px;
     text-transform: uppercase;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .metric-value {
@@ -278,12 +285,17 @@
     font-size: 46px;
     font-weight: 400;
     line-height: 1;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
   .metric-unit {
     font-size: 15px;
     color: var(--muted);
-    margin-top: 2px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    align-self: flex-end;
+    padding-bottom: 4px;
   }
 
   .metric-placeholder {
@@ -401,7 +413,7 @@
   }
 
   .bar-fill.limited { background: linear-gradient(90deg, #ff4757, #ff6b81); color: white; }
-  .bar-fill.unlimited { background: linear-gradient(90deg, #2ed573, #7bed9f); color: #080c10; }
+  .bar-fill.unlimited { background: linear-gradient(90deg, #2ed573, #7bed9f); color: #fff; }
 
   .speedup-badge {
     font-family: var(--mono);
@@ -713,7 +725,8 @@ const socket = io();
 let runCount = 0;
 
 function fmtSpeedup(s) {
-  if (s >= 1) return `快了 ${s} 倍`;
+  if (s <= 0 || !isFinite(s)) return '—';
+  if (s >= 1) return `快了 ${s.toFixed(2)} 倍`;
   return `慢了 ${(1/s).toFixed(2)} 倍`;
 }
 function limDesc(s) {
@@ -853,13 +866,14 @@ socket.on('benchmark_result', (data) => {
   document.getElementById('run-btn').disabled = false;
 
   const { limited, unlimited } = data;
-  runCount++;
-  document.getElementById('run-count').textContent = `第 ${runCount} 次`;
 
   if (limited.error || unlimited.error) {
     addLog(`ERROR: ${limited.error || unlimited.error}`, 'error');
     return;
   }
+
+  runCount++;
+  document.getElementById('run-count').textContent = `第 ${runCount} 次`;
 
   // Update cards
   const lb = limited.benchmarks;
@@ -921,8 +935,7 @@ socket.on('benchmark_result', (data) => {
   }
   chart.update();
 
-  const speedup = (limited.total_elapsed_ms / unlimited.total_elapsed_ms).toFixed(2);
-  addLog(`第 ${runCount} 次完成 — 受限：${limited.total_elapsed_ms} 毫秒 | 無限制：${unlimited.total_elapsed_ms} 毫秒 | 受限慢了 ${speedup} 倍`);
+  addLog(`第 ${runCount} 次完成 — 受限：${limited.total_elapsed_ms} 毫秒 | 無限制：${unlimited.total_elapsed_ms} 毫秒 | 受限${fmtSpeedup(limited.total_elapsed_ms / unlimited.total_elapsed_ms)}`);
 });
 
 socket.on('connect', () => {

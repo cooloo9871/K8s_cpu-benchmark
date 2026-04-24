@@ -10,6 +10,7 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, jsonify
 from datetime import datetime
+from pathlib import Path
 
 app = Flask(__name__)
 
@@ -213,6 +214,179 @@ def bench_threads():
         "cpu_limit": get_cpu_limit_str(),
         "timestamp": datetime.utcnow().isoformat()
     })
+
+# ── NUMA helpers ──────────────────────────────────────────────────────────────
+
+def _parse_cpulist(s):
+    cpus = []
+    for part in s.strip().split(','):
+        part = part.strip()
+        if not part:
+            continue
+        if '-' in part:
+            lo, hi = part.split('-', 1)
+            cpus.extend(range(int(lo), int(hi) + 1))
+        else:
+            cpus.append(int(part))
+    return cpus
+
+def get_numa_cpu_map():
+    """Returns {node_id: [cpu_ids]} from /sys/devices/system/node/."""
+    result = {}
+    base = Path('/sys/devices/system/node')
+    if not base.exists():
+        return result
+    for d in sorted(base.glob('node[0-9]*')):
+        nid = int(d.name[4:])
+        f = d / 'cpulist'
+        if f.exists():
+            text = f.read_text().strip()
+            if text:
+                result[nid] = _parse_cpulist(text)
+    return result
+
+def _stream_chunk(args):
+    """Sum one array chunk, optionally pinning thread to a CPU set. Releases GIL."""
+    arr_chunk, cpuset = args
+    if cpuset:
+        try:
+            os.sched_setaffinity(0, cpuset)
+        except (OSError, PermissionError, AttributeError):
+            pass
+    return float(np.sum(arr_chunk))
+
+@app.route("/bench/numa")
+def bench_numa():
+    try:
+        return _bench_numa_impl()
+    except Exception as exc:
+        return jsonify({
+            "available": False,
+            "mode": "error",
+            "error": str(exc),
+            "pod_name": POD_NAME,
+            "has_cpu_limit": HAS_LIMIT,
+            "cpu_limit": get_cpu_limit_str(),
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+def _bench_numa_impl():
+    numa_map = get_numa_cpu_map()
+    try:
+        allowed = sorted(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        allowed = list(range(os.cpu_count() or 1))
+    allowed_set = set(allowed)
+
+    # Which NUMA nodes have at least 1 CPU allowed in this container
+    node_cpus = {}
+    for nid, cpus in numa_map.items():
+        avail = [c for c in cpus if c in allowed_set]
+        if avail:
+            node_cpus[nid] = avail
+
+    array_mb = 128
+    n = (array_mb * 1024 * 1024) // 8  # float64 element count
+
+    def timed_stream(chunk_list, cpu_list):
+        task_args = [(chunk_list[i], {cpu_list[i % len(cpu_list)]}) for i in range(len(chunk_list))]
+        t = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=len(chunk_list)) as ex:
+            list(ex.map(_stream_chunk, task_args))
+        return (time.perf_counter() - t) * 1000
+
+    if len(node_cpus) >= 2:
+        # ── Cross-NUMA: allocate on node A, compare node-A vs node-B access ──
+        node_ids = sorted(node_cpus.keys())
+        cpus_a = node_cpus[node_ids[0]]
+        cpus_b = node_cpus[node_ids[1]]
+        workers = min(4, len(cpus_a), len(cpus_b))
+
+        saved_aff = None
+        try:
+            saved_aff = os.sched_getaffinity(0)
+            os.sched_setaffinity(0, {cpus_a[0]})
+        except Exception:
+            pass
+
+        arr = np.ones(n, dtype=np.float64)
+        float(np.sum(arr))          # force first-touch page allocation on node A
+        chunks = np.array_split(arr, workers)
+
+        timed_stream(chunks, cpus_a)   # warm-up
+        local_ms  = round(sum(timed_stream(chunks, cpus_a) for _ in range(3)) / 3, 2)
+        remote_ms = round(sum(timed_stream(chunks, cpus_b) for _ in range(3)) / 3, 2)
+
+        if saved_aff:
+            try:
+                os.sched_setaffinity(0, saved_aff)
+            except Exception:
+                pass
+
+        bw_local  = round(array_mb / 1024 / (local_ms  / 1000), 2)
+        bw_remote = round(array_mb / 1024 / (remote_ms / 1000), 2)
+
+        return jsonify({
+            "available": True,
+            "mode": "cross_numa",
+            "array_mb": array_mb,
+            "workers": workers,
+            "total_numa_nodes": len(numa_map),
+            "node_a": node_ids[0],
+            "node_b": node_ids[1],
+            "node_a_cpus": cpus_a,
+            "node_b_cpus": cpus_b,
+            "local_ms": local_ms,
+            "remote_ms": remote_ms,
+            "slowdown": round(remote_ms / local_ms, 2) if local_ms > 0 else 0,
+            "bandwidth_local_gbps": bw_local,
+            "bandwidth_remote_gbps": bw_remote,
+            "pod_name": POD_NAME,
+            "has_cpu_limit": HAS_LIMIT,
+            "cpu_limit": get_cpu_limit_str(),
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    else:
+        # ── Fallback: memory-bandwidth scaling (1 thread vs N threads) ────────
+        workers = max(1, min(4, len(allowed)))
+        arr = np.ones(n, dtype=np.float64)
+        float(np.sum(arr))          # warm-up / force allocation
+
+        t = time.perf_counter()
+        for _ in range(3):
+            float(np.sum(arr))
+        single_ms = round((time.perf_counter() - t) / 3 * 1000, 2)
+
+        chunks = np.array_split(arr, workers)
+        multi_tasks = [(c, None) for c in chunks]
+        with ThreadPoolExecutor(max_workers=workers) as ex:  # warm-up
+            list(ex.map(_stream_chunk, multi_tasks))
+        t = time.perf_counter()
+        for _ in range(3):
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                list(ex.map(_stream_chunk, multi_tasks))
+        multi_ms = round((time.perf_counter() - t) / 3 * 1000, 2)
+
+        bw_single = round(array_mb / 1024 / (single_ms / 1000), 2) if single_ms > 0 else 0
+        bw_multi  = round(array_mb / 1024 / (multi_ms  / 1000), 2) if multi_ms  > 0 else 0
+
+        return jsonify({
+            "available": False,
+            "mode": "single_numa",
+            "reason": "container CPUs only span 1 NUMA node — showing bandwidth scaling instead",
+            "total_numa_nodes": len(numa_map),
+            "allowed_cpus": allowed,
+            "array_mb": array_mb,
+            "workers": workers,
+            "single_ms": single_ms,
+            "multi_ms": multi_ms,
+            "bandwidth_single_gbps": bw_single,
+            "bandwidth_multi_gbps": bw_multi,
+            "pod_name": POD_NAME,
+            "has_cpu_limit": HAS_LIMIT,
+            "cpu_limit": get_cpu_limit_str(),
+            "timestamp": datetime.utcnow().isoformat()
+        })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, threaded=True)

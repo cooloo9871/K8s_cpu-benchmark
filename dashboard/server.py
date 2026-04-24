@@ -67,6 +67,21 @@ class Handler(SimpleHTTPRequestHandler):
             t1.start(); t2.start()
             t1.join();  t2.join()
             self.send_json(200, results)
+        elif self.path == "/api/numa_bench":
+            results = {}
+            def run_numa(url, key, label):
+                try:
+                    with urllib.request.urlopen(f"{url}/bench/numa", timeout=120) as r:
+                        data = json.loads(r.read())
+                        data["label"] = label
+                        results[key] = data
+                except Exception as e:
+                    results[key] = {"label": label, "error": str(e)}
+            t1 = threading.Thread(target=run_numa, args=(LIMITED_URL,   "limited",   "CPU Limited"))
+            t2 = threading.Thread(target=run_numa, args=(UNLIMITED_URL, "unlimited", "CPU Unlimited"))
+            t1.start(); t2.start()
+            t1.join();  t2.join()
+            self.send_json(200, results)
         elif self.path == "/api/health":
             self.send_json(200, {"status": "ok"})
         else:

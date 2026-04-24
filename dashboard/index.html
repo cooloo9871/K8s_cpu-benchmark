@@ -53,11 +53,11 @@
   .card.lim .card-name{color:var(--lim)}.card.unlim .card-name{color:var(--unlim)}
   .badge{font-family:var(--mono);font-size:17px;padding:10px 22px;border-radius:20px;background:var(--surface2);border:1px solid var(--border)}
   .card.lim .badge{color:var(--lim);border-color:var(--lim)}.card.unlim .badge{color:var(--unlim);border-color:var(--unlim)}
-  .metrics{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px}
-  .metric{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:26px}
-  .m-label{font-family:var(--mono);font-size:17px;color:var(--muted);letter-spacing:.1em;margin-bottom:12px;text-transform:uppercase}
-  .m-value{font-family:var(--mono);font-size:46px;line-height:1;font-weight:400}
-  .m-unit{font-size:17px;color:var(--muted);margin-top:8px}
+  .metrics{display:flex;flex-direction:column;gap:12px}
+  .metric{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:18px 28px;display:flex;align-items:center;gap:16px}
+  .m-label{font-family:var(--mono);font-size:17px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .m-value{font-family:var(--mono);font-size:46px;line-height:1;font-weight:400;white-space:nowrap;flex-shrink:0}
+  .m-unit{font-size:17px;color:var(--muted);white-space:nowrap;flex-shrink:0;align-self:flex-end;padding-bottom:5px}
   .ph{color:var(--border)}
   .total-row{grid-column:1/-1;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:28px 36px;display:flex;justify-content:space-between;align-items:center;margin-top:8px}
   .t-label{font-family:var(--mono);font-size:19px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
@@ -75,7 +75,7 @@
   .bar-track{height:50px;background:var(--surface2);border-radius:10px;overflow:hidden;border:1px solid var(--border)}
   .bar-fill{height:100%;border-radius:9px;display:flex;align-items:center;padding-left:16px;font-family:var(--mono);font-size:18px;font-weight:600;transition:width .8s cubic-bezier(.4,0,.2,1);white-space:nowrap}
   .bar-fill.lim{background:linear-gradient(90deg,#ff4757,#ff6b81);color:#fff}
-  .bar-fill.unlim{background:linear-gradient(90deg,#2ed573,#7bed9f);color:#080c10}
+  .bar-fill.unlim{background:linear-gradient(90deg,#2ed573,#7bed9f);color:#fff}
 
   /* SPEEDUP BADGE */
   .spdup-wrap{display:flex;align-items:center;justify-content:center}
@@ -227,7 +227,50 @@
         </div>
       </div>
     </div>
-    <div id="threadInsight" style="display:none;padding:14px 18px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:13px;line-height:1.9;color:var(--muted)"></div>
+    <div id="threadInsight" style="display:none;padding:14px 18px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:18px;line-height:1.9;color:var(--muted)"></div>
+  </section>
+
+  <section>
+    <div class="sec-title">NUMA 記憶體頻寬測試 — 256 MB 陣列連續讀取（本地 Node vs 跨 Node）</div>
+    <div class="run-row" style="margin-bottom:20px">
+      <button class="run-btn" id="numaBtn" onclick="runNumaBench()">▶ 執行 NUMA 壓測</button>
+      <span class="run-count" id="numaStatus">尚未執行</span>
+    </div>
+    <div class="cards" style="margin-bottom:16px">
+      <div class="card lim">
+        <div class="card-hd">
+          <div><div class="card-sub" id="nl-pod">—</div><div class="card-name">CPU Limited</div></div>
+          <div class="badge" id="nl-badge">讀取中...</div>
+        </div>
+        <div id="nl-topo" style="font-family:var(--mono);font-size:15px;color:var(--muted);margin-bottom:16px">—</div>
+        <div class="metrics">
+          <div class="metric"><div class="m-label" id="nl-l1">本地存取</div><div class="m-value ph" id="nl-v1" style="font-size:36px">—</div><div class="m-unit" id="nl-u1">毫秒</div></div>
+          <div class="metric"><div class="m-label" id="nl-l2">跨 Node 存取</div><div class="m-value ph" id="nl-v2" style="font-size:36px">—</div><div class="m-unit" id="nl-u2">毫秒</div></div>
+          <div class="metric"><div class="m-label" id="nl-l3">效能差異</div><div class="m-value ph" id="nl-v3" style="font-size:26px;white-space:nowrap">—</div><div class="m-unit">&nbsp;</div></div>
+        </div>
+        <div class="total-row" style="margin-top:12px">
+          <div class="t-label">記憶體頻寬（本地 / 跨 node）</div>
+          <div><div class="t-value" id="nl-bw" style="font-size:26px">—</div><div class="m-unit">GB/s</div></div>
+        </div>
+      </div>
+      <div class="card unlim">
+        <div class="card-hd">
+          <div><div class="card-sub" id="nu-pod">—</div><div class="card-name">CPU Unlimited</div></div>
+          <div class="badge" id="nu-badge">讀取中...</div>
+        </div>
+        <div id="nu-topo" style="font-family:var(--mono);font-size:15px;color:var(--muted);margin-bottom:16px">—</div>
+        <div class="metrics">
+          <div class="metric"><div class="m-label" id="nu-l1">本地存取</div><div class="m-value ph" id="nu-v1" style="font-size:36px">—</div><div class="m-unit" id="nu-u1">毫秒</div></div>
+          <div class="metric"><div class="m-label" id="nu-l2">跨 Node 存取</div><div class="m-value ph" id="nu-v2" style="font-size:36px">—</div><div class="m-unit" id="nu-u2">毫秒</div></div>
+          <div class="metric"><div class="m-label" id="nu-l3">效能差異</div><div class="m-value ph" id="nu-v3" style="font-size:26px;white-space:nowrap">—</div><div class="m-unit">&nbsp;</div></div>
+        </div>
+        <div class="total-row" style="margin-top:12px">
+          <div class="t-label">記憶體頻寬（本地 / 跨 node）</div>
+          <div><div class="t-value" id="nu-bw" style="font-size:26px">—</div><div class="m-unit">GB/s</div></div>
+        </div>
+      </div>
+    </div>
+    <div id="numaInsight" style="display:none;padding:14px 18px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:18px;line-height:1.9;color:var(--muted)"></div>
   </section>
 
   <section>
@@ -250,7 +293,8 @@
 let runN=0,histL=[],histU=[],histLbls=[];
 
 function fmtSpeedup(s){
-  if(s>=1) return `快了 ${s} 倍`;
+  if(s<=0||!isFinite(s)) return '—';
+  if(s>=1) return `快了 ${s.toFixed(2)} 倍`;
   return `慢了 ${(1/s).toFixed(2)} 倍`;
 }
 function limDesc(s){
@@ -300,6 +344,8 @@ function updateSpdup(id, ratio, isTotal=false){
   const numEl=el.querySelector('.spdup-num');
   const lblEl=el.querySelector('.spdup-label');
   el.className='spdup-badge'+(isTotal?' spdup-total':'');
+  el.style.borderColor='';
+  el.style.color='';
   if(ratio>=10){
     numEl.textContent='慢了 '+ratio.toFixed(1)+' 倍';
     lblEl.textContent='受限 Pod 嚴重落後';
@@ -366,6 +412,89 @@ async function runThreadBench(){
     log(`多執行緒 — 受限：1條=${L.single_ms}ms / 4條=${L.multi_ms}ms（${fmtSpeedup(L.speedup)}）| 無限制：1條=${U.single_ms}ms / 4條=${U.multi_ms}ms（${fmtSpeedup(U.speedup)}）`);
   }catch(e){log('THREAD ERROR: '+e.message);}
   finally{document.getElementById('overlay').classList.remove('on');document.getElementById('threadBtn').disabled=false;}
+}
+
+function renderNuma(pfx, d) {
+  document.getElementById(pfx+'-pod').textContent = d.pod_name || '—';
+  document.getElementById(pfx+'-badge').textContent = d.cpu_limit ? `limits.cpu: ${d.cpu_limit}` : '未設定 CPU 限制';
+  if (d.available) {
+    const fmtCpus = (arr) => (arr||[]).slice(0,4).join(',') + ((arr||[]).length > 4 ? '…' : '');
+    document.getElementById(pfx+'-topo').textContent =
+      `${d.total_numa_nodes} NUMA nodes | Node${d.node_a}:[${fmtCpus(d.node_a_cpus)}] ↔ Node${d.node_b}:[${fmtCpus(d.node_b_cpus)}] | ${d.workers} 執行緒 × 256 MB`;
+    document.getElementById(pfx+'-l1').textContent = '本地存取';
+    document.getElementById(pfx+'-l2').textContent = '跨 Node 存取';
+    document.getElementById(pfx+'-l3').textContent = '效能損失';
+    document.getElementById(pfx+'-v1').textContent = d.local_ms;
+    document.getElementById(pfx+'-v2').textContent = d.remote_ms;
+    const s = d.slowdown || 1;
+    document.getElementById(pfx+'-v3').textContent = s >= 1.05 ? `慢了 ${s.toFixed(2)} 倍` : '≈ 相同';
+    document.getElementById(pfx+'-bw').textContent = `${d.bandwidth_local_gbps} / ${d.bandwidth_remote_gbps}`;
+  } else {
+    document.getElementById(pfx+'-topo').textContent =
+      `⚠ 單一 NUMA node（偵測到 ${d.total_numa_nodes||1} node） | 改為頻寬擴展測試 | ${d.workers} 執行緒 × 256 MB`;
+    document.getElementById(pfx+'-l1').textContent = '1 條執行緒';
+    document.getElementById(pfx+'-l2').textContent = `${d.workers} 條執行緒`;
+    document.getElementById(pfx+'-l3').textContent = '頻寬擴展';
+    document.getElementById(pfx+'-v1').textContent = d.single_ms || '—';
+    document.getElementById(pfx+'-v2').textContent = d.multi_ms || '—';
+    const r = (d.single_ms && d.multi_ms) ? d.single_ms / d.multi_ms : 0;
+    document.getElementById(pfx+'-v3').textContent = r > 0 ? `快了 ${r.toFixed(2)} 倍` : '—';
+    document.getElementById(pfx+'-bw').textContent = `${d.bandwidth_single_gbps||'—'} / ${d.bandwidth_multi_gbps||'—'}`;
+  }
+  [pfx+'-v1', pfx+'-v2', pfx+'-v3'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('ph');
+  });
+}
+
+async function runNumaBench() {
+  document.getElementById('numaBtn').disabled = true;
+  document.getElementById('numaStatus').textContent = '執行中...';
+  document.getElementById('overlay').classList.add('on');
+  try {
+    const res = await fetch('/api/numa_bench');
+    const d = await res.json();
+    const L = d.limited, U = d.unlimited;
+    if (!L || !U) {
+      log('NUMA 壓測錯誤：伺服器回傳格式異常 — ' + JSON.stringify(d).slice(0,120));
+      document.getElementById('numaStatus').textContent = '錯誤';
+      return;
+    }
+    if (L.error || U.error) {
+      log('NUMA 壓測錯誤：' + (L.error || U.error));
+      document.getElementById('numaStatus').textContent = '錯誤';
+      return;
+    }
+    if (L.mode === 'error' || U.mode === 'error') {
+      log('NUMA 壓測錯誤：' + (L.error || U.error || '未知 worker 錯誤'));
+      document.getElementById('numaStatus').textContent = '錯誤';
+      return;
+    }
+    renderNuma('nl', L);
+    renderNuma('nu', U);
+    const ins = document.getElementById('numaInsight');
+    ins.style.display = 'block';
+    if (L.available && U.available) {
+      ins.innerHTML =
+        `● NUMA ${L.total_numa_nodes} nodes | ${L.workers} 執行緒 × 256 MB 連續讀取 | 記憶體分配在 Node${L.node_a}，分別由 Node${L.node_a} / Node${L.node_b} CPU 存取<br>`+
+        `● CPU Limited  — 本地 ${L.local_ms} ms（${L.bandwidth_local_gbps} GB/s）→ 跨 node ${L.remote_ms} ms（${L.bandwidth_remote_gbps} GB/s），跨 node 慢 ${L.slowdown}x<br>`+
+        `● CPU Unlimited — 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）→ 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s），跨 node 慢 ${U.slowdown}x<br>`+
+        `● 解法：kubelet 設定 cpuManagerPolicy: static + topologyManagerPolicy: single-numa-node，Pod 的 CPU 與記憶體將綁定在同一 NUMA node。`;
+    } else {
+      ins.innerHTML =
+        `● container 內 CPU 只涵蓋單一 NUMA node — 無法展示跨 node 存取差異<br>`+
+        `● 已改為記憶體頻寬擴展測試：1 執行緒 vs ${L.workers} 執行緒讀取 256 MB<br>`+
+        `● 若要展示 NUMA 效能差異：設定 requests.cpu = limits.cpu（整數）並啟用 K8s CPU Manager (static) + Topology Manager (single-numa-node)`;
+    }
+    document.getElementById('numaStatus').textContent = '完成';
+    log(`NUMA 壓測完成 — 受限 Pod：本地 ${L.local_ms||L.single_ms||'—'}ms / 跨node ${L.remote_ms||L.multi_ms||'—'}ms`);
+  } catch(e) {
+    log('NUMA ERROR: ' + e.message);
+    document.getElementById('numaStatus').textContent = '錯誤';
+  } finally {
+    document.getElementById('overlay').classList.remove('on');
+    document.getElementById('numaBtn').disabled = false;
+  }
 }
 
 async function runBench(){
