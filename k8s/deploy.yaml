@@ -110,11 +110,6 @@ spec:
                   fieldPath: metadata.name
             - name: HAS_CPU_LIMIT
               value: "false"
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
-            # limits: intentionally NOT set — no CPU throttling
           readinessProbe:
             httpGet:
               path: /health
