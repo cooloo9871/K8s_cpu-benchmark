@@ -395,12 +395,24 @@ function renderNuma(pfx, d) {
   document.getElementById(pfx+'-badge').textContent = d.cpu_limit ? `limits.cpu: ${d.cpu_limit}` : '未設定 CPU 限制';
   if (d.available) {
     const fmtCpus = (arr) => (arr||[]).slice(0,4).join(',') + ((arr||[]).length > 4 ? '…' : '');
+
+    // Build CPU number → NUMA node lookup so we can annotate actual CPUs
+    const cpuToNode = {};
+    (d.node_a_cpus||[]).forEach(c => { cpuToNode[c] = d.node_a; });
+    (d.node_b_cpus||[]).forEach(c => { cpuToNode[c] = d.node_b; });
+
+    // affinity_ok===false: threads ran on overlapping cores → unreliable result.
+    // undefined (old backend) treated as OK to avoid false warnings.
+    const afOk = d.affinity_ok !== false;
+
     const fmtActual = (cpus) => {
       if (!cpus || !cpus.length) return '';
-      const overlap = (d.actual_local_cpus||[]).filter(c => (d.actual_remote_cpus||[]).includes(c));
-      const warn = overlap.length > 0 ? ' ⚠綁核無效' : '';
-      return `  實際 CPU: [${cpus.join(',')}]${warn}`;
+      if (!afOk) return `  實際 CPU: [${cpus.join(',')}] ⚠綁核失敗`;
+      // Show each CPU with its NUMA node so user can verify pinning worked
+      const parts = cpus.map(c => `CPU${c}@Node${cpuToNode[c] !== undefined ? cpuToNode[c] : '?'}`);
+      return `  (${parts.join(', ')})`;
     };
+
     document.getElementById(pfx+'-topo').textContent =
       `${d.total_numa_nodes} NUMA nodes | Node${d.node_a}:[${fmtCpus(d.node_a_cpus)}] ↔ Node${d.node_b}:[${fmtCpus(d.node_b_cpus)}] | ${d.workers} 執行緒 × ${d.array_mb} MB`;
     document.getElementById(pfx+'-l1').textContent = `本地存取${fmtActual(d.actual_local_cpus)}`;
@@ -410,10 +422,11 @@ function renderNuma(pfx, d) {
     document.getElementById(pfx+'-v2').textContent = d.remote_ms;
     const s = d.slowdown || 0;
     document.getElementById(pfx+'-v3').textContent =
-      s <= 0      ? '—' :
-      s >= 1.05   ? `慢了 ${s.toFixed(2)} 倍` :
-      s <= 0.95   ? `⚠ 遠端更快 ${(1/s).toFixed(2)} 倍（量測異常）` :
-                    '≈ 相同';
+      s <= 0    ? '—' :
+      !afOk     ? `⚠ 綁核失敗，數值不可靠` :
+      s >= 1.05 ? `慢了 ${s.toFixed(2)} 倍` :
+      s <= 0.95 ? `⚠ 遠端更快 ${(1/s).toFixed(2)} 倍（量測異常）` :
+                  '≈ 相同';
     document.getElementById(pfx+'-bw').textContent = `${d.bandwidth_local_gbps} / ${d.bandwidth_remote_gbps}`;
   } else {
     document.getElementById(pfx+'-topo').textContent =

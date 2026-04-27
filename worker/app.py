@@ -315,40 +315,51 @@ def _bench_numa_impl():
 
         arr = np.ones(n, dtype=np.float64)
         float(np.sum(arr))              # first-touch: place pages on Node A DRAM
+
+        # 64 MB eviction buffer (first-touched on main thread → Node A DRAM).
+        # Streaming through it populates Node A L3 with new lines, evicting arr.
+        # arr[:] = value writes through L3 (write-allocate), so it does NOT flush
+        # arr from L3 — the evict_buf stream-read approach is the correct way to
+        # ensure both local and remote measurements start from DRAM, not L3.
+        evict_n = (64 * 1024 * 1024) // 8
+        evict_buf = np.empty(evict_n, dtype=np.float64)
+        float(np.sum(evict_buf))        # first-touch evict_buf on Node A
+
         chunks = np.array_split(arr, workers)
 
-        # Pre-create executor once; exclude thread-pool setup from timing
-        PASSES = 5  # odd number — median index is unambiguous
+        # Pre-create executor once; exclude thread-pool setup from timing.
+        PASSES = 7  # odd; median index = 3
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            # Symmetric warm-up: one pass per node so both start with equal
-            # cache state before the timed loop begins.
-            arr[:] = 1.0
+            # Symmetric warm-up: evict arr from L3, then one warm pass per node.
+            float(np.sum(evict_buf))
             run_pass(ex, chunks, cpus_a)
-            arr[:] = 1.0
+            float(np.sum(evict_buf))
             run_pass(ex, chunks, cpus_b)
 
-            # Interleaved timed passes: each local/remote pair sees identical
-            # pre-pass cache state (arr written to 1.0 before every read).
-            # This eliminates the L3-warm asymmetry that caused remote to
-            # appear faster when local had already warmed the cache.
+            # Interleaved timed passes: stream evict_buf before every measurement
+            # so arr must be fetched from DRAM each time (not L3).
             local_times, remote_times   = [], []
             local_cpus_seen, remote_cpus_seen = set(), set()
             for _ in range(PASSES):
-                arr[:] = 1.0
+                float(np.sum(evict_buf))   # flush arr from Node A L3
                 t, cpus = run_pass(ex, chunks, cpus_a)
                 local_times.append(t)
                 local_cpus_seen.update(cpus)
 
-                arr[:] = 1.0
+                float(np.sum(evict_buf))   # flush before remote
                 t, cpus = run_pass(ex, chunks, cpus_b)
                 remote_times.append(t)
                 remote_cpus_seen.update(cpus)
 
-            # Median is robust to single-pass OS scheduling outliers.
+            # Median discards outlier passes caused by OS scheduling noise.
             local_ms          = round(sorted(local_times)[PASSES // 2], 2)
             remote_ms         = round(sorted(remote_times)[PASSES // 2], 2)
             actual_local_cpus  = sorted(local_cpus_seen)
             actual_remote_cpus = sorted(remote_cpus_seen)
+
+        # affinity_ok=False means threads ran on overlapping cores →
+        # local and remote saw the same memory path → measurement unreliable.
+        affinity_ok = not bool(set(actual_local_cpus) & set(actual_remote_cpus))
 
         if saved_aff:
             try:
@@ -372,6 +383,7 @@ def _bench_numa_impl():
             "node_b_cpus": cpus_b,
             "actual_local_cpus": actual_local_cpus,
             "actual_remote_cpus": actual_remote_cpus,
+            "affinity_ok": affinity_ok,
             "local_ms": local_ms,
             "remote_ms": remote_ms,
             "slowdown": slowdown,
