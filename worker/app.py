@@ -318,24 +318,37 @@ def _bench_numa_impl():
         chunks = np.array_split(arr, workers)
 
         # Pre-create executor once; exclude thread-pool setup from timing
+        PASSES = 5  # odd number — median index is unambiguous
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            # ── Local (Node A reads Node A DRAM) ──────────────────────────
-            run_pass(ex, chunks, cpus_a)           # warm-up, discard
-            local_runs        = [run_pass(ex, chunks, cpus_a) for _ in range(3)]
-            local_ms          = round(sum(r[0] for r in local_runs) / 3, 2)
-            actual_local_cpus = sorted({c for r in local_runs for c in r[1]})
+            # Symmetric warm-up: one pass per node so both start with equal
+            # cache state before the timed loop begins.
+            arr[:] = 1.0
+            run_pass(ex, chunks, cpus_a)
+            arr[:] = 1.0
+            run_pass(ex, chunks, cpus_b)
 
-            # Write zeros to flush L3 cache lines before remote measurement.
-            # executor.map is synchronous — all threads are idle here, no race.
-            # The physical pages remain on Node A DRAM; Node B CPUs must still
-            # cross QPI to fetch them.
-            arr[:] = 0.0
+            # Interleaved timed passes: each local/remote pair sees identical
+            # pre-pass cache state (arr written to 1.0 before every read).
+            # This eliminates the L3-warm asymmetry that caused remote to
+            # appear faster when local had already warmed the cache.
+            local_times, remote_times   = [], []
+            local_cpus_seen, remote_cpus_seen = set(), set()
+            for _ in range(PASSES):
+                arr[:] = 1.0
+                t, cpus = run_pass(ex, chunks, cpus_a)
+                local_times.append(t)
+                local_cpus_seen.update(cpus)
 
-            # ── Remote (Node B reads Node A DRAM) ─────────────────────────
-            run_pass(ex, chunks, cpus_b)           # warm-up, discard
-            remote_runs        = [run_pass(ex, chunks, cpus_b) for _ in range(3)]
-            remote_ms          = round(sum(r[0] for r in remote_runs) / 3, 2)
-            actual_remote_cpus = sorted({c for r in remote_runs for c in r[1]})
+                arr[:] = 1.0
+                t, cpus = run_pass(ex, chunks, cpus_b)
+                remote_times.append(t)
+                remote_cpus_seen.update(cpus)
+
+            # Median is robust to single-pass OS scheduling outliers.
+            local_ms          = round(sorted(local_times)[PASSES // 2], 2)
+            remote_ms         = round(sorted(remote_times)[PASSES // 2], 2)
+            actual_local_cpus  = sorted(local_cpus_seen)
+            actual_remote_cpus = sorted(remote_cpus_seen)
 
         if saved_aff:
             try:
