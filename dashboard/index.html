@@ -395,12 +395,16 @@ function renderNuma(pfx, d) {
   document.getElementById(pfx+'-badge').textContent = d.cpu_limit ? `limits.cpu: ${d.cpu_limit}` : '未設定 CPU 限制';
   if (d.available) {
     const fmtCpus = (arr) => (arr||[]).slice(0,4).join(',') + ((arr||[]).length > 4 ? '…' : '');
-    const localCpuStr  = d.actual_local_cpus  && d.actual_local_cpus.length  ? `實際 CPU: [${d.actual_local_cpus.join(',')}]`  : '';
-    const remoteCpuStr = d.actual_remote_cpus && d.actual_remote_cpus.length ? `實際 CPU: [${d.actual_remote_cpus.join(',')}]` : '';
+    const fmtActual = (cpus) => {
+      if (!cpus || !cpus.length) return '';
+      const overlap = (d.actual_local_cpus||[]).filter(c => (d.actual_remote_cpus||[]).includes(c));
+      const warn = overlap.length > 0 ? ' ⚠綁核無效' : '';
+      return `  實際 CPU: [${cpus.join(',')}]${warn}`;
+    };
     document.getElementById(pfx+'-topo').textContent =
       `${d.total_numa_nodes} NUMA nodes | Node${d.node_a}:[${fmtCpus(d.node_a_cpus)}] ↔ Node${d.node_b}:[${fmtCpus(d.node_b_cpus)}] | ${d.workers} 執行緒 × ${d.array_mb} MB`;
-    document.getElementById(pfx+'-l1').textContent = `本地存取${localCpuStr ? '  '+localCpuStr : ''}`;
-    document.getElementById(pfx+'-l2').textContent = `跨 Node 存取${remoteCpuStr ? '  '+remoteCpuStr : ''}`;
+    document.getElementById(pfx+'-l1').textContent = `本地存取${fmtActual(d.actual_local_cpus)}`;
+    document.getElementById(pfx+'-l2').textContent = `跨 Node 存取${fmtActual(d.actual_remote_cpus)}`;
     document.getElementById(pfx+'-l3').textContent = '效能損失';
     document.getElementById(pfx+'-v1').textContent = d.local_ms;
     document.getElementById(pfx+'-v2').textContent = d.remote_ms;
@@ -413,15 +417,16 @@ function renderNuma(pfx, d) {
     document.getElementById(pfx+'-bw').textContent = `${d.bandwidth_local_gbps} / ${d.bandwidth_remote_gbps}`;
   } else {
     document.getElementById(pfx+'-topo').textContent =
-      `⚠ 單一 NUMA node（偵測到 ${d.total_numa_nodes||1} node） | 改為頻寬擴展測試 | ${d.workers} 執行緒 × 256 MB`;
+      `⚠ 單一 NUMA node（偵測到 ${d.total_numa_nodes||1} node） | 改為頻寬擴展測試 | ${d.workers} 執行緒 × ${d.array_mb||256} MB`;
     document.getElementById(pfx+'-l1').textContent = '1 條執行緒';
     document.getElementById(pfx+'-l2').textContent = `${d.workers} 條執行緒`;
     document.getElementById(pfx+'-l3').textContent = '頻寬擴展';
-    document.getElementById(pfx+'-v1').textContent = d.single_ms || '—';
-    document.getElementById(pfx+'-v2').textContent = d.multi_ms || '—';
-    const r = (d.single_ms && d.multi_ms) ? d.single_ms / d.multi_ms : 0;
+    document.getElementById(pfx+'-v1').textContent = d.single_ms != null ? d.single_ms : '—';
+    document.getElementById(pfx+'-v2').textContent = d.multi_ms  != null ? d.multi_ms  : '—';
+    const r = (d.single_ms > 0 && d.multi_ms > 0) ? d.single_ms / d.multi_ms : 0;
     document.getElementById(pfx+'-v3').textContent = r > 0 ? `快了 ${r.toFixed(2)} 倍` : '—';
-    document.getElementById(pfx+'-bw').textContent = `${d.bandwidth_single_gbps||'—'} / ${d.bandwidth_multi_gbps||'—'}`;
+    document.getElementById(pfx+'-bw').textContent =
+      `${d.bandwidth_single_gbps != null ? d.bandwidth_single_gbps : '—'} / ${d.bandwidth_multi_gbps != null ? d.bandwidth_multi_gbps : '—'}`;
   }
   [pfx+'-v1', pfx+'-v2', pfx+'-v3'].forEach(id => {
     const el = document.getElementById(id);
@@ -458,14 +463,14 @@ async function runNumaBench() {
     ins.style.display = 'block';
     if (L.available && U.available) {
       ins.innerHTML =
-        `● NUMA ${L.total_numa_nodes} nodes | ${L.workers} 執行緒 × 256 MB 連續讀取 | 記憶體分配在 Node${L.node_a}，分別由 Node${L.node_a} / Node${L.node_b} CPU 存取<br>`+
+        `● NUMA ${L.total_numa_nodes} nodes | ${L.workers} 執行緒 × ${L.array_mb} MB 連續讀取 | 記憶體分配在 Node${L.node_a}，分別由 Node${L.node_a} / Node${L.node_b} CPU 存取<br>`+
         `● CPU Limited  — 本地 ${L.local_ms} ms（${L.bandwidth_local_gbps} GB/s）→ 跨 node ${L.remote_ms} ms（${L.bandwidth_remote_gbps} GB/s），跨 node 慢 ${L.slowdown}x<br>`+
         `● CPU Unlimited — 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）→ 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s），跨 node 慢 ${U.slowdown}x<br>`+
         `● 解法：kubelet 設定 cpuManagerPolicy: static + topologyManagerPolicy: single-numa-node，Pod 的 CPU 與記憶體將綁定在同一 NUMA node。`;
     } else {
       ins.innerHTML =
         `● container 內 CPU 只涵蓋單一 NUMA node — 無法展示跨 node 存取差異<br>`+
-        `● 已改為記憶體頻寬擴展測試：1 執行緒 vs ${L.workers} 執行緒讀取 256 MB<br>`+
+        `● 已改為記憶體頻寬擴展測試：1 執行緒 vs ${L.workers} 執行緒讀取 ${L.array_mb||256} MB<br>`+
         `● 若要展示 NUMA 效能差異：設定 requests.cpu = limits.cpu（整數）並啟用 K8s CPU Manager (static) + Topology Manager (single-numa-node)`;
     }
     document.getElementById('numaStatus').textContent = '完成';

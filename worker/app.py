@@ -6,6 +6,7 @@ os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
 os.environ.setdefault('BLIS_NUM_THREADS', '1')
 import time
 import math
+import threading
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, jsonify
@@ -55,7 +56,6 @@ def is_prime(n):
     return True
 
 def count_primes(limit):
-    """Count primes up to limit - pure CPU intensive work"""
     count = 0
     for n in range(2, limit + 1):
         if is_prime(n):
@@ -63,7 +63,6 @@ def count_primes(limit):
     return count
 
 def fibonacci(n):
-    """Recursive fibonacci - exponential CPU work"""
     if n <= 1:
         return n
     return fibonacci(n - 1) + fibonacci(n - 2)
@@ -75,7 +74,6 @@ def _numpy_matrix_work(_):
     return np.dot(a, b)
 
 def matrix_multiply(size):
-    """Matrix multiplication"""
     a = [[float(i * size + j) for j in range(size)] for i in range(size)]
     b = [[float(i + j) for j in range(size)] for i in range(size)]
     result = [[0.0] * size for _ in range(size)]
@@ -226,25 +224,33 @@ def get_numa_cpu_map():
                 result[nid] = _parse_cpulist(text)
     return result
 
-def _get_current_cpu():
-    """Read the actual CPU core this thread is running on from /proc/self/stat."""
+def _get_thread_cpu():
+    """Return the CPU core the calling thread is currently running on.
+    Reads /proc/self/task/<tid>/stat field 39 (1-indexed) = processor.
+    Returns -1 if unavailable."""
     try:
-        with open('/proc/self/stat') as f:
-            return int(f.read().split()[38])
+        tid = threading.get_native_id()
+        with open(f'/proc/self/task/{tid}/stat') as f:
+            raw = f.read()
+        # Strip "pid (comm)" — comm can contain spaces, use rfind(')') to be safe.
+        # Remaining fields start at field 3 (state), so:
+        #   after_comm[0]=state(3), [1]=ppid(4), ..., [35]=exit_signal(38), [36]=processor(39)
+        after_comm = raw[raw.rfind(')') + 1:].split()
+        return int(after_comm[36])
     except Exception:
         return -1
 
 def _stream_chunk(args):
-    """Sum one array chunk, optionally pinning thread to a CPU set. Releases GIL."""
+    """Pin thread to cpuset, sum the chunk (releases GIL), record actual CPU."""
     arr_chunk, cpuset = args
     if cpuset:
         try:
             os.sched_setaffinity(0, cpuset)
         except (OSError, PermissionError, AttributeError):
             pass
-    result = float(np.sum(arr_chunk))
-    actual_cpu = _get_current_cpu()
-    return result, actual_cpu
+    val = float(np.sum(arr_chunk))
+    cpu = _get_thread_cpu()
+    return val, cpu
 
 @app.route("/bench/numa")
 def bench_numa():
@@ -269,32 +275,37 @@ def _bench_numa_impl():
         allowed = list(range(os.cpu_count() or 1))
     allowed_set = set(allowed)
 
-    # Which NUMA nodes have at least 1 CPU allowed in this container
+    # NUMA nodes that have at least 1 allowed CPU in this container
     node_cpus = {}
     for nid, cpus in numa_map.items():
         avail = [c for c in cpus if c in allowed_set]
         if avail:
             node_cpus[nid] = avail
 
-    array_mb = 256
-    n = (array_mb * 1024 * 1024) // 8  # float64 element count
+    array_mb = 128
+    n = (array_mb * 1024 * 1024) // 8  # number of float64 elements
 
-    def timed_stream(executor, chunk_list, cpu_list):
-        # executor is pre-created outside timing to exclude thread-pool setup overhead
-        task_args = [(chunk_list[i], {cpu_list[i % len(cpu_list)]}) for i in range(len(chunk_list))]
+    def run_pass(executor, chunks, cpu_list):
+        """One timed pass: pin each thread to its CPU, stream-read its chunk.
+        Returns (elapsed_ms, sorted list of actual CPUs observed)."""
+        task_args = [
+            (chunks[i], {cpu_list[i % len(cpu_list)]})
+            for i in range(len(chunks))
+        ]
         t = time.perf_counter()
         results = list(executor.map(_stream_chunk, task_args))
-        elapsed = (time.perf_counter() - t) * 1000
+        elapsed_ms = (time.perf_counter() - t) * 1000
         actual_cpus = sorted({r[1] for r in results if r[1] >= 0})
-        return elapsed, actual_cpus
+        return elapsed_ms, actual_cpus
 
+    # ── Cross-NUMA mode ───────────────────────────────────────────────────────
     if len(node_cpus) >= 2:
-        # ── Cross-NUMA: allocate on node A, compare node-A vs node-B access ──
         node_ids = sorted(node_cpus.keys())
-        cpus_a = node_cpus[node_ids[0]]
-        cpus_b = node_cpus[node_ids[1]]
-        workers = min(4, len(cpus_a), len(cpus_b))
+        cpus_a   = node_cpus[node_ids[0]]
+        cpus_b   = node_cpus[node_ids[1]]
+        workers  = min(4, len(cpus_a), len(cpus_b))
 
+        # Pin main thread to Node A so first-touch places pages there
         saved_aff = None
         try:
             saved_aff = os.sched_getaffinity(0)
@@ -303,19 +314,27 @@ def _bench_numa_impl():
             pass
 
         arr = np.ones(n, dtype=np.float64)
-        float(np.sum(arr))          # force first-touch page allocation on node A
+        float(np.sum(arr))              # first-touch: place pages on Node A DRAM
         chunks = np.array_split(arr, workers)
 
+        # Pre-create executor once; exclude thread-pool setup from timing
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            timed_stream(ex, chunks, cpus_a)   # warm-up local
-            local_runs  = [timed_stream(ex, chunks, cpus_a) for _ in range(3)]
-            local_ms    = round(sum(r[0] for r in local_runs) / 3, 2)
+            # ── Local (Node A reads Node A DRAM) ──────────────────────────
+            run_pass(ex, chunks, cpus_a)           # warm-up, discard
+            local_runs        = [run_pass(ex, chunks, cpus_a) for _ in range(3)]
+            local_ms          = round(sum(r[0] for r in local_runs) / 3, 2)
             actual_local_cpus = sorted({c for r in local_runs for c in r[1]})
-            # flush cache state: write zeros so next reads are truly cold
+
+            # Write zeros to flush L3 cache lines before remote measurement.
+            # executor.map is synchronous — all threads are idle here, no race.
+            # The physical pages remain on Node A DRAM; Node B CPUs must still
+            # cross QPI to fetch them.
             arr[:] = 0.0
-            timed_stream(ex, chunks, cpus_b)   # warm-up remote
-            remote_runs = [timed_stream(ex, chunks, cpus_b) for _ in range(3)]
-            remote_ms   = round(sum(r[0] for r in remote_runs) / 3, 2)
+
+            # ── Remote (Node B reads Node A DRAM) ─────────────────────────
+            run_pass(ex, chunks, cpus_b)           # warm-up, discard
+            remote_runs        = [run_pass(ex, chunks, cpus_b) for _ in range(3)]
+            remote_ms          = round(sum(r[0] for r in remote_runs) / 3, 2)
             actual_remote_cpus = sorted({c for r in remote_runs for c in r[1]})
 
         if saved_aff:
@@ -324,8 +343,9 @@ def _bench_numa_impl():
             except Exception:
                 pass
 
-        bw_local  = round(array_mb / 1024 / (local_ms  / 1000), 2)
-        bw_remote = round(array_mb / 1024 / (remote_ms / 1000), 2)
+        bw_local  = round(array_mb / 1024 / (local_ms  / 1000), 2) if local_ms  > 0 else 0
+        bw_remote = round(array_mb / 1024 / (remote_ms / 1000), 2) if remote_ms > 0 else 0
+        slowdown  = round(remote_ms / local_ms, 2) if local_ms > 0 else 0
 
         return jsonify({
             "available": True,
@@ -341,7 +361,7 @@ def _bench_numa_impl():
             "actual_remote_cpus": actual_remote_cpus,
             "local_ms": local_ms,
             "remote_ms": remote_ms,
-            "slowdown": round(remote_ms / local_ms, 2) if local_ms > 0 else 0,
+            "slowdown": slowdown,
             "bandwidth_local_gbps": bw_local,
             "bandwidth_remote_gbps": bw_remote,
             "pod_name": POD_NAME,
@@ -349,24 +369,28 @@ def _bench_numa_impl():
             "cpu_limit": get_cpu_limit_str(),
             "timestamp": datetime.utcnow().isoformat()
         })
+
+    # ── Single-NUMA fallback: bandwidth scaling (1 thread vs N threads) ───────
     else:
-        # ── Fallback: memory-bandwidth scaling (1 thread vs N threads) ────────
         workers = max(1, min(4, len(allowed)))
         arr = np.ones(n, dtype=np.float64)
-        float(np.sum(arr))          # warm-up / force allocation
+        float(np.sum(arr))              # warm-up / force allocation
 
+        # Single-thread baseline: main thread reads full array
         t = time.perf_counter()
         for _ in range(3):
             float(np.sum(arr))
         single_ms = round((time.perf_counter() - t) / 3 * 1000, 2)
 
-        chunks = np.array_split(arr, workers)
-        multi_tasks = [(c, None) for c in chunks]
+        # Multi-thread: N threads read split chunks; pool kept alive across runs
+        chunks     = np.array_split(arr, workers)
+        task_args  = [(c, None) for c in chunks]
+
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            list(ex.map(_stream_chunk, multi_tasks))  # warm-up
+            list(ex.map(_stream_chunk, task_args))  # warm-up, discard
             t = time.perf_counter()
             for _ in range(3):
-                list(ex.map(_stream_chunk, multi_tasks))
+                list(ex.map(_stream_chunk, task_args))
             multi_ms = round((time.perf_counter() - t) / 3 * 1000, 2)
 
         bw_single = round(array_mb / 1024 / (single_ms / 1000), 2) if single_ms > 0 else 0
