@@ -395,15 +395,21 @@ function renderNuma(pfx, d) {
   document.getElementById(pfx+'-badge').textContent = d.cpu_limit ? `limits.cpu: ${d.cpu_limit}` : '未設定 CPU 限制';
   if (d.available) {
     const fmtCpus = (arr) => (arr||[]).slice(0,4).join(',') + ((arr||[]).length > 4 ? '…' : '');
+    const localCpuStr  = d.actual_local_cpus  && d.actual_local_cpus.length  ? `實際 CPU: [${d.actual_local_cpus.join(',')}]`  : '';
+    const remoteCpuStr = d.actual_remote_cpus && d.actual_remote_cpus.length ? `實際 CPU: [${d.actual_remote_cpus.join(',')}]` : '';
     document.getElementById(pfx+'-topo').textContent =
-      `${d.total_numa_nodes} NUMA nodes | Node${d.node_a}:[${fmtCpus(d.node_a_cpus)}] ↔ Node${d.node_b}:[${fmtCpus(d.node_b_cpus)}] | ${d.workers} 執行緒 × 256 MB`;
-    document.getElementById(pfx+'-l1').textContent = '本地存取';
-    document.getElementById(pfx+'-l2').textContent = '跨 Node 存取';
+      `${d.total_numa_nodes} NUMA nodes | Node${d.node_a}:[${fmtCpus(d.node_a_cpus)}] ↔ Node${d.node_b}:[${fmtCpus(d.node_b_cpus)}] | ${d.workers} 執行緒 × ${d.array_mb} MB`;
+    document.getElementById(pfx+'-l1').textContent = `本地存取${localCpuStr ? '  '+localCpuStr : ''}`;
+    document.getElementById(pfx+'-l2').textContent = `跨 Node 存取${remoteCpuStr ? '  '+remoteCpuStr : ''}`;
     document.getElementById(pfx+'-l3').textContent = '效能損失';
     document.getElementById(pfx+'-v1').textContent = d.local_ms;
     document.getElementById(pfx+'-v2').textContent = d.remote_ms;
-    const s = d.slowdown || 1;
-    document.getElementById(pfx+'-v3').textContent = s >= 1.05 ? `慢了 ${s.toFixed(2)} 倍` : '≈ 相同';
+    const s = d.slowdown || 0;
+    document.getElementById(pfx+'-v3').textContent =
+      s <= 0      ? '—' :
+      s >= 1.05   ? `慢了 ${s.toFixed(2)} 倍` :
+      s <= 0.95   ? `⚠ 遠端更快 ${(1/s).toFixed(2)} 倍（量測異常）` :
+                    '≈ 相同';
     document.getElementById(pfx+'-bw').textContent = `${d.bandwidth_local_gbps} / ${d.bandwidth_remote_gbps}`;
   } else {
     document.getElementById(pfx+'-topo').textContent =

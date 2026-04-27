@@ -172,7 +172,7 @@ fibonacci(36) 呼叫次數 ≈ 2 × fib(37) - 1 ≈ 29,000,000 次
 
 ### NUMA 記憶體頻寬測試
 
-使用 128 MB float64 陣列進行連續讀取（`np.sum`），透過 `os.sched_setaffinity` 將執行緒分別綁定到不同 NUMA node 的 CPU，量測本地存取與跨 node 存取的頻寬差異。
+使用 256 MB float64 陣列進行連續讀取（`np.sum`），透過 `os.sched_setaffinity` 將執行緒分別綁定到不同 NUMA node 的 CPU，量測本地存取與跨 node 存取的頻寬差異。陣列大小設為 256 MB 是為了確保超過大多數伺服器 CPU 的 L3 cache，避免 cache 命中掩蓋 NUMA 效應。
 
 | 模式 | 說明 |
 |------|------|

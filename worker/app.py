@@ -226,6 +226,14 @@ def get_numa_cpu_map():
                 result[nid] = _parse_cpulist(text)
     return result
 
+def _get_current_cpu():
+    """Read the actual CPU core this thread is running on from /proc/self/stat."""
+    try:
+        with open('/proc/self/stat') as f:
+            return int(f.read().split()[38])
+    except Exception:
+        return -1
+
 def _stream_chunk(args):
     """Sum one array chunk, optionally pinning thread to a CPU set. Releases GIL."""
     arr_chunk, cpuset = args
@@ -234,7 +242,9 @@ def _stream_chunk(args):
             os.sched_setaffinity(0, cpuset)
         except (OSError, PermissionError, AttributeError):
             pass
-    return float(np.sum(arr_chunk))
+    result = float(np.sum(arr_chunk))
+    actual_cpu = _get_current_cpu()
+    return result, actual_cpu
 
 @app.route("/bench/numa")
 def bench_numa():
@@ -266,15 +276,17 @@ def _bench_numa_impl():
         if avail:
             node_cpus[nid] = avail
 
-    array_mb = 128
+    array_mb = 256
     n = (array_mb * 1024 * 1024) // 8  # float64 element count
 
-    def timed_stream(chunk_list, cpu_list):
+    def timed_stream(executor, chunk_list, cpu_list):
+        # executor is pre-created outside timing to exclude thread-pool setup overhead
         task_args = [(chunk_list[i], {cpu_list[i % len(cpu_list)]}) for i in range(len(chunk_list))]
         t = time.perf_counter()
-        with ThreadPoolExecutor(max_workers=len(chunk_list)) as ex:
-            list(ex.map(_stream_chunk, task_args))
-        return (time.perf_counter() - t) * 1000
+        results = list(executor.map(_stream_chunk, task_args))
+        elapsed = (time.perf_counter() - t) * 1000
+        actual_cpus = sorted({r[1] for r in results if r[1] >= 0})
+        return elapsed, actual_cpus
 
     if len(node_cpus) >= 2:
         # ── Cross-NUMA: allocate on node A, compare node-A vs node-B access ──
@@ -294,9 +306,17 @@ def _bench_numa_impl():
         float(np.sum(arr))          # force first-touch page allocation on node A
         chunks = np.array_split(arr, workers)
 
-        timed_stream(chunks, cpus_a)   # warm-up
-        local_ms  = round(sum(timed_stream(chunks, cpus_a) for _ in range(3)) / 3, 2)
-        remote_ms = round(sum(timed_stream(chunks, cpus_b) for _ in range(3)) / 3, 2)
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            timed_stream(ex, chunks, cpus_a)   # warm-up local
+            local_runs  = [timed_stream(ex, chunks, cpus_a) for _ in range(3)]
+            local_ms    = round(sum(r[0] for r in local_runs) / 3, 2)
+            actual_local_cpus = sorted({c for r in local_runs for c in r[1]})
+            # flush cache state: write zeros so next reads are truly cold
+            arr[:] = 0.0
+            timed_stream(ex, chunks, cpus_b)   # warm-up remote
+            remote_runs = [timed_stream(ex, chunks, cpus_b) for _ in range(3)]
+            remote_ms   = round(sum(r[0] for r in remote_runs) / 3, 2)
+            actual_remote_cpus = sorted({c for r in remote_runs for c in r[1]})
 
         if saved_aff:
             try:
@@ -317,6 +337,8 @@ def _bench_numa_impl():
             "node_b": node_ids[1],
             "node_a_cpus": cpus_a,
             "node_b_cpus": cpus_b,
+            "actual_local_cpus": actual_local_cpus,
+            "actual_remote_cpus": actual_remote_cpus,
             "local_ms": local_ms,
             "remote_ms": remote_ms,
             "slowdown": round(remote_ms / local_ms, 2) if local_ms > 0 else 0,
@@ -340,13 +362,12 @@ def _bench_numa_impl():
 
         chunks = np.array_split(arr, workers)
         multi_tasks = [(c, None) for c in chunks]
-        with ThreadPoolExecutor(max_workers=workers) as ex:  # warm-up
-            list(ex.map(_stream_chunk, multi_tasks))
-        t = time.perf_counter()
-        for _ in range(3):
-            with ThreadPoolExecutor(max_workers=workers) as ex:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            list(ex.map(_stream_chunk, multi_tasks))  # warm-up
+            t = time.perf_counter()
+            for _ in range(3):
                 list(ex.map(_stream_chunk, multi_tasks))
-        multi_ms = round((time.perf_counter() - t) / 3 * 1000, 2)
+            multi_ms = round((time.perf_counter() - t) / 3 * 1000, 2)
 
         bw_single = round(array_mb / 1024 / (single_ms / 1000), 2) if single_ms > 0 else 0
         bw_multi  = round(array_mb / 1024 / (multi_ms  / 1000), 2) if multi_ms  > 0 else 0
