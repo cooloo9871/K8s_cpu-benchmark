@@ -408,7 +408,12 @@ async function runThreadBench(){
 
 function renderNuma(pfx, d) {
   document.getElementById(pfx+'-pod').textContent = d.pod_name || '—';
-  document.getElementById(pfx+'-badge').textContent = fmtCpuLimit(d);
+  const _allTopo = (d.node_a_cpus||[]).length + (d.node_b_cpus||[]).length;
+  const _allowed = d.allowed_cpus || [];
+  const _badgeTxt = (_allowed.length > 0 && _allowed.length < _allTopo)
+    ? `cpuset: [${_allowed.join(', ')}]`
+    : '未設定 CPU 綁定';
+  document.getElementById(pfx+'-badge').textContent = _badgeTxt;
   if (d.available) {
     const fmtCpus = (arr) => (arr||[]).slice(0,4).join(',') + ((arr||[]).length > 4 ? '…' : '');
 

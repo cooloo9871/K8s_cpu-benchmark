@@ -411,6 +411,7 @@ def _bench_numa_impl():
             "slowdown": slowdown,
             "bandwidth_local_gbps": bw_local,
             "bandwidth_remote_gbps": bw_remote,
+            "allowed_cpus": allowed,
             "pod_name": POD_NAME,
             "has_cpu_limit": HAS_LIMIT,
             "cpu_limit": get_cpu_limit_str(),
