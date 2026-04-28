@@ -54,8 +54,8 @@
   .badge{font-family:var(--mono);font-size:17px;padding:10px 22px;border-radius:20px;background:var(--surface2);border:1px solid var(--border)}
   .card.lim .badge{color:var(--lim);border-color:var(--lim)}.card.unlim .badge{color:var(--unlim);border-color:var(--unlim)}
   .metrics{display:flex;flex-direction:column;gap:12px}
-  .metric{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:18px 28px;display:flex;align-items:center;gap:16px}
-  .m-label{font-family:var(--mono);font-size:17px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .metric{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:18px 28px;display:flex;align-items:flex-start;gap:16px}
+  .m-label{font-family:var(--mono);font-size:17px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;flex:1;min-width:0;}
   .m-value{font-family:var(--mono);font-size:46px;line-height:1;font-weight:400;white-space:nowrap;flex-shrink:0}
   .m-unit{font-size:17px;color:var(--muted);white-space:nowrap;flex-shrink:0;align-self:flex-end;padding-bottom:5px}
   .ph{color:var(--border)}
@@ -418,25 +418,32 @@ function renderNuma(pfx, d) {
     // undefined (old backend) treated as OK to avoid false warnings.
     const afOk = d.affinity_ok !== false;
 
-    const fmtActual = (cpus) => {
-      if (!cpus || !cpus.length) return '';
-      if (!afOk) return `  實際 CPU: [${cpus.join(',')}] ⚠綁核失敗`;
-      // Show each CPU with its NUMA node so user can verify pinning worked
-      const parts = cpus.map(c => `CPU${c}@Node${cpuToNode[c] !== undefined ? cpuToNode[c] : '?'}`);
-      return `  (${parts.join(', ')})`;
+    const fmtThreadDesc = (threadCpus, memNode) => {
+      if (!threadCpus || !threadCpus.length) return '';
+      if (!afOk) return `<br><span style="font-size:13px;color:var(--lim);text-transform:none">⚠ 綁核失敗</span>`;
+      const n = threadCpus.length;
+      const node = cpuToNode[threadCpus[0]] !== undefined ? cpuToNode[threadCpus[0]] : '?';
+      const isLocal = memNode !== undefined && String(node) === String(memNode);
+      const locality = isLocal
+        ? `與記憶體同在 Node${node}`
+        : `跨節點讀取 Node${memNode} 記憶體`;
+      const cpuList = threadCpus.join(', ');
+      return `<br><span style="font-size:13px;opacity:.7;text-transform:none;letter-spacing:.03em">Node${node} 共 ${n} 核，每核 1 執行緒（CPU ${cpuList}），${locality}</span>`;
     };
 
     document.getElementById(pfx+'-topo').textContent =
       `${d.total_numa_nodes} NUMA nodes | Node${d.node_a}:[${fmtCpus(d.node_a_cpus)}] ↔ Node${d.node_b}:[${fmtCpus(d.node_b_cpus)}] | ${d.workers} 執行緒 × ${d.array_mb} MB`;
-    document.getElementById(pfx+'-l1').textContent = `本地存取${fmtActual(d.actual_local_cpus)}`;
-    document.getElementById(pfx+'-l2').textContent = `跨 Node 存取${fmtActual(d.actual_remote_cpus)}`;
+    document.getElementById(pfx+'-l1').innerHTML = `本地存取${fmtThreadDesc(d.local_thread_cpus || d.actual_local_cpus, d.node_a)}`;
+    document.getElementById(pfx+'-l2').innerHTML = `跨 Node 存取${fmtThreadDesc(d.remote_thread_cpus || d.actual_remote_cpus, d.node_a)}`;
     document.getElementById(pfx+'-l3').textContent = '效能損失';
     document.getElementById(pfx+'-v1').textContent = d.local_ms;
     document.getElementById(pfx+'-v2').textContent = d.remote_ms;
     const s = d.slowdown || 0;
+    const ftOk = d.first_touch_in_node_a !== false; // false = arr pages on wrong node
     document.getElementById(pfx+'-v3').textContent =
       s <= 0    ? '—' :
       !afOk     ? `⚠ 綁核失敗，數值不可靠` :
+      !ftOk     ? `⚠ 記憶體初始化在錯誤 Node，本地/遠端標籤對調` :
       s >= 1.05 ? `慢了 ${s.toFixed(2)} 倍` :
       s <= 0.95 ? `⚠ 遠端更快 ${(1/s).toFixed(2)} 倍（量測異常）` :
                   '≈ 相同';

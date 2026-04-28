@@ -293,7 +293,7 @@ def _bench_numa_impl():
 
     def run_pass(executor, chunks, cpu_list):
         """One timed pass: pin each thread to its CPU, stream-read its chunk.
-        Returns (elapsed_ms, sorted list of actual CPUs observed)."""
+        Returns (elapsed_ms, sorted actual CPU set, per-thread CPU list)."""
         task_args = [
             (chunks[i], {cpu_list[i % len(cpu_list)]})
             for i in range(len(chunks))
@@ -301,41 +301,43 @@ def _bench_numa_impl():
         t = time.perf_counter()
         results = list(executor.map(_stream_chunk, task_args))
         elapsed_ms = (time.perf_counter() - t) * 1000
-        actual_cpus = sorted({r[1] for r in results if r[1] >= 0})
-        return elapsed_ms, actual_cpus
+        per_thread_cpus = [r[1] for r in results]
+        actual_cpus = sorted({c for c in per_thread_cpus if c >= 0})
+        return elapsed_ms, actual_cpus, per_thread_cpus
 
     # ── Cross-NUMA mode ───────────────────────────────────────────────────────
     if len(node_cpus) >= 2:
         node_ids = sorted(node_cpus.keys())
         cpus_a   = node_cpus[node_ids[0]]
         cpus_b   = node_cpus[node_ids[1]]
-        workers  = min(4, len(cpus_a), len(cpus_b))
+        workers  = min(len(cpus_a), len(cpus_b))
 
-        # Pin main thread to Node A so first-touch places pages there
-        saved_aff = None
-        try:
-            saved_aff = os.sched_getaffinity(0)
-            os.sched_setaffinity(0, {cpus_a[0]})
-        except Exception:
-            pass
-
-        arr = np.ones(n, dtype=np.float64)
-        float(np.sum(arr))              # first-touch: place pages on Node A DRAM
-
-        # 64 MB eviction buffer (first-touched on main thread → Node A DRAM).
-        # Streaming through it populates Node A L3 with new lines, evicting arr.
-        # arr[:] = value writes through L3 (write-allocate), so it does NOT flush
-        # arr from L3 — the evict_buf stream-read approach is the correct way to
-        # ensure both local and remote measurements start from DRAM, not L3.
-        evict_n = (64 * 1024 * 1024) // 8
+        # Use np.empty so no pages are faulted yet (demand-paged).
+        # np.ones() would first-touch in the main thread, whose sched_setaffinity
+        # often fails silently in containers (no SYS_NICE) → pages land on the
+        # wrong node → "remote" reads become local and appear faster.
+        arr      = np.empty(n, dtype=np.float64)
+        evict_n  = (64 * 1024 * 1024) // 8
         evict_buf = np.empty(evict_n, dtype=np.float64)
-        float(np.sum(evict_buf))        # first-touch evict_buf on Node A
-
-        chunks = np.array_split(arr, workers)
+        chunks   = np.array_split(arr, workers)
 
         # Pre-create executor once; exclude thread-pool setup from timing.
         PASSES = 7  # odd; median index = 3
         with ThreadPoolExecutor(max_workers=workers) as ex:
+            # First-touch arr and evict_buf from a worker thread pinned to Node A.
+            # Worker threads reliably set their own affinity; the main thread cannot.
+            def _init_on_node_a(_):
+                try:
+                    os.sched_setaffinity(0, {cpus_a[0]})
+                except Exception:
+                    pass
+                arr[:]       = 1.0   # page-fault: places all arr pages on Node A DRAM
+                evict_buf[:] = 1.0   # page-fault evict_buf on Node A as well
+                return _get_thread_cpu()
+
+            touch_cpu             = ex.submit(_init_on_node_a, None).result()
+            first_touch_in_node_a = (touch_cpu in set(cpus_a))
+
             # Symmetric warm-up: evict arr from L3, then one warm pass per node.
             float(np.sum(evict_buf))
             run_pass(ex, chunks, cpus_a)
@@ -344,34 +346,36 @@ def _bench_numa_impl():
 
             # Interleaved timed passes: stream evict_buf before every measurement
             # so arr must be fetched from DRAM each time (not L3).
-            local_times, remote_times   = [], []
+            local_times, remote_times = [], []
             local_cpus_seen, remote_cpus_seen = set(), set()
+            local_thr_log, remote_thr_log = [], []
             for _ in range(PASSES):
                 float(np.sum(evict_buf))   # flush arr from Node A L3
-                t, cpus = run_pass(ex, chunks, cpus_a)
+                t, cpus, thr = run_pass(ex, chunks, cpus_a)
                 local_times.append(t)
                 local_cpus_seen.update(cpus)
+                local_thr_log.append(thr)
 
                 float(np.sum(evict_buf))   # flush before remote
-                t, cpus = run_pass(ex, chunks, cpus_b)
+                t, cpus, thr = run_pass(ex, chunks, cpus_b)
                 remote_times.append(t)
                 remote_cpus_seen.update(cpus)
+                remote_thr_log.append(thr)
 
             # Median discards outlier passes caused by OS scheduling noise.
-            local_ms          = round(sorted(local_times)[PASSES // 2], 2)
-            remote_ms         = round(sorted(remote_times)[PASSES // 2], 2)
+            local_order  = sorted(range(PASSES), key=lambda i: local_times[i])
+            remote_order = sorted(range(PASSES), key=lambda i: remote_times[i])
+            local_ms  = round(local_times[local_order[PASSES // 2]], 2)
+            remote_ms = round(remote_times[remote_order[PASSES // 2]], 2)
+            local_thread_cpus  = local_thr_log[local_order[PASSES // 2]]
+            remote_thread_cpus = remote_thr_log[remote_order[PASSES // 2]]
             actual_local_cpus  = sorted(local_cpus_seen)
             actual_remote_cpus = sorted(remote_cpus_seen)
 
-        # affinity_ok=False means threads ran on overlapping cores →
-        # local and remote saw the same memory path → measurement unreliable.
-        affinity_ok = not bool(set(actual_local_cpus) & set(actual_remote_cpus))
-
-        if saved_aff:
-            try:
-                os.sched_setaffinity(0, saved_aff)
-            except Exception:
-                pass
+        # affinity_ok=False: worker threads ran on overlapping cores → unreliable.
+        # first_touch_in_node_a=False: arr pages landed on the wrong node →
+        #   "local" is actually cross-QPI and "remote" is actually local → labels swapped.
+        affinity_ok           = not bool(set(actual_local_cpus) & set(actual_remote_cpus))
 
         bw_local  = round(array_mb / 1024 / (local_ms  / 1000), 2) if local_ms  > 0 else 0
         bw_remote = round(array_mb / 1024 / (remote_ms / 1000), 2) if remote_ms > 0 else 0
@@ -389,7 +393,10 @@ def _bench_numa_impl():
             "node_b_cpus": cpus_b,
             "actual_local_cpus": actual_local_cpus,
             "actual_remote_cpus": actual_remote_cpus,
+            "local_thread_cpus": local_thread_cpus,
+            "remote_thread_cpus": remote_thread_cpus,
             "affinity_ok": affinity_ok,
+            "first_touch_in_node_a": first_touch_in_node_a,
             "local_ms": local_ms,
             "remote_ms": remote_ms,
             "slowdown": slowdown,
