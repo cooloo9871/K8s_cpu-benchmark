@@ -19,27 +19,33 @@ POD_NAME = os.environ.get("POD_NAME", "unknown")
 HAS_LIMIT = os.environ.get("HAS_CPU_LIMIT", "false")
 
 def get_cpu_limit_str():
-    # cgroup v2
+    # cgroup v2 CFS quota
     try:
         with open('/sys/fs/cgroup/cpu.max') as f:
             quota_str, period_str = f.read().strip().split()
-        if quota_str == 'max':
-            return None
-        millis = round(int(quota_str) / int(period_str) * 1000)
-        return f"{millis}m"
+        if quota_str != 'max':
+            millis = round(int(quota_str) / int(period_str) * 1000)
+            return f"{millis}m"
     except Exception:
         pass
-    # cgroup v1
+    # cgroup v1 CFS quota
     try:
         with open('/sys/fs/cgroup/cpu/cpu.cfs_quota_us') as f:
             quota = int(f.read().strip())
-        if quota == -1:
-            return None
-        with open('/sys/fs/cgroup/cpu/cpu.cfs_period_us') as f:
-            period = int(f.read().strip())
-        millis = round(quota / period * 1000)
-        return f"{millis}m"
+        if quota != -1:
+            with open('/sys/fs/cgroup/cpu/cpu.cfs_period_us') as f:
+                period = int(f.read().strip())
+            millis = round(quota / period * 1000)
+            return f"{millis}m"
     except Exception:
+        pass
+    # K8s static CPU Manager: exclusive cpuset replaces CFS quota.
+    # cpu.max = "max", but sched_getaffinity returns only the pinned cores.
+    try:
+        allowed = sorted(os.sched_getaffinity(0))
+        if len(allowed) < (os.cpu_count() or 1):
+            return "cpuset:" + ",".join(str(c) for c in allowed)
+    except (AttributeError, OSError):
         pass
     return None
 

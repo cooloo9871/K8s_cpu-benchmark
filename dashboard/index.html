@@ -207,7 +207,7 @@
   </section>
 
   <section>
-    <div class="sec-title">NUMA 記憶體頻寬測試 — 256 MB 陣列連續讀取（本地 Node vs 跨 Node）</div>
+    <div class="sec-title">NUMA 記憶體頻寬測試 — 128 MB 陣列連續讀取（本地 Node vs 跨 Node）</div>
     <div class="run-row" style="margin-bottom:20px">
       <button class="run-btn" id="numaBtn" onclick="runNumaBench()">▶ 執行 NUMA 壓測</button>
       <span class="run-count" id="numaStatus">尚未執行</span>
@@ -268,6 +268,19 @@
 <script>
 let runN=0,histL=[],histU=[],histLbls=[];
 
+// Returns a human-readable CPU limit label.
+// Handles three cases: CFS quota ("100m"), cpuset pinning ("cpuset:3,20"),
+// and no detected limit (falls back to HAS_CPU_LIMIT env flag).
+function fmtCpuLimit(d) {
+  if (!d) return '未設定 CPU 限制';
+  if (d.cpu_limit) {
+    if (d.cpu_limit.startsWith('cpuset:'))
+      return `cpuset: [${d.cpu_limit.slice(7)}]`;
+    return `limits.cpu: ${d.cpu_limit}`;
+  }
+  return d.has_cpu_limit === 'true' ? 'CPU 已限制 (cpuset)' : '未設定 CPU 限制';
+}
+
 function fmtSpeedup(s){
   if(s<=0||!isFinite(s)) return '—';
   if(s>=1) return `快了 ${s.toFixed(2)} 倍`;
@@ -279,14 +292,14 @@ function limDesc(s){
 
 function updateBadges(limited, unlimited){
   if(limited&&!limited.error){
-    const txt=limited.cpu_limit?`limits.cpu: ${limited.cpu_limit}`:'未設定 CPU 限制';
+    const txt = fmtCpuLimit(limited);
     document.getElementById('lim-badge').textContent=txt;
     document.getElementById('tl-badge').textContent=txt;
-    const legTxt=limited.cpu_limit?`CPU Limited (${limited.cpu_limit})`:'CPU Limited';
+    const legTxt = limited.cpu_limit ? `CPU Limited (${limited.cpu_limit})` : 'CPU Limited';
     document.getElementById('leg-lim').textContent=legTxt;
   }
   if(unlimited&&!unlimited.error){
-    const txt=unlimited.cpu_limit?`limits.cpu: ${unlimited.cpu_limit}`:'未設定 CPU 限制';
+    const txt = fmtCpuLimit(unlimited);
     document.getElementById('unlim-badge').textContent=txt;
     document.getElementById('tu-badge').textContent=txt;
   }
@@ -392,7 +405,7 @@ async function runThreadBench(){
 
 function renderNuma(pfx, d) {
   document.getElementById(pfx+'-pod').textContent = d.pod_name || '—';
-  document.getElementById(pfx+'-badge').textContent = d.cpu_limit ? `limits.cpu: ${d.cpu_limit}` : '未設定 CPU 限制';
+  document.getElementById(pfx+'-badge').textContent = fmtCpuLimit(d);
   if (d.available) {
     const fmtCpus = (arr) => (arr||[]).slice(0,4).join(',') + ((arr||[]).length > 4 ? '…' : '');
 
@@ -429,17 +442,33 @@ function renderNuma(pfx, d) {
                   '≈ 相同';
     document.getElementById(pfx+'-bw').textContent = `${d.bandwidth_local_gbps} / ${d.bandwidth_remote_gbps}`;
   } else {
+    const w = d.workers || 1;
     document.getElementById(pfx+'-topo').textContent =
-      `⚠ 單一 NUMA node（偵測到 ${d.total_numa_nodes||1} node） | 改為頻寬擴展測試 | ${d.workers} 執行緒 × ${d.array_mb||256} MB`;
-    document.getElementById(pfx+'-l1').textContent = '1 條執行緒';
-    document.getElementById(pfx+'-l2').textContent = `${d.workers} 條執行緒`;
-    document.getElementById(pfx+'-l3').textContent = '頻寬擴展';
-    document.getElementById(pfx+'-v1').textContent = d.single_ms != null ? d.single_ms : '—';
-    document.getElementById(pfx+'-v2').textContent = d.multi_ms  != null ? d.multi_ms  : '—';
-    const r = (d.single_ms > 0 && d.multi_ms > 0) ? d.single_ms / d.multi_ms : 0;
-    document.getElementById(pfx+'-v3').textContent = r > 0 ? `快了 ${r.toFixed(2)} 倍` : '—';
-    document.getElementById(pfx+'-bw').textContent =
-      `${d.bandwidth_single_gbps != null ? d.bandwidth_single_gbps : '—'} / ${d.bandwidth_multi_gbps != null ? d.bandwidth_multi_gbps : '—'}`;
+      `⚠ 單一 NUMA node（偵測到 ${d.total_numa_nodes||1} node）| ${d.array_mb||128} MB 頻寬測試 | 可用 CPU: [${(d.allowed_cpus||[]).join(',')||'—'}]`;
+    if (w <= 1) {
+      // 1 core cpuset：只能跑 1 條執行緒，改為展示本地 DRAM 單執行緒頻寬
+      document.getElementById(pfx+'-l1').textContent = '本地讀取時間';
+      document.getElementById(pfx+'-l2').textContent = '本地記憶體頻寬';
+      document.getElementById(pfx+'-l3').textContent = 'NUMA 狀態';
+      document.getElementById(pfx+'-u1').textContent = '毫秒';
+      document.getElementById(pfx+'-u2').textContent = 'GB/s';
+      document.getElementById(pfx+'-v1').textContent = d.single_ms != null ? d.single_ms : '—';
+      document.getElementById(pfx+'-v2').textContent = d.bandwidth_single_gbps != null ? d.bandwidth_single_gbps : '—';
+      document.getElementById(pfx+'-v3').textContent = '本地 Node 綁定，無跨節點延遲';
+      document.getElementById(pfx+'-bw').textContent =
+        `${d.bandwidth_single_gbps != null ? d.bandwidth_single_gbps : '—'} / —`;
+    } else {
+      document.getElementById(pfx+'-l1').textContent = '1 條執行緒';
+      document.getElementById(pfx+'-l2').textContent = `${w} 條執行緒`;
+      document.getElementById(pfx+'-l3').textContent = '頻寬擴展';
+      document.getElementById(pfx+'-u2').textContent = '毫秒';
+      document.getElementById(pfx+'-v1').textContent = d.single_ms != null ? d.single_ms : '—';
+      document.getElementById(pfx+'-v2').textContent = d.multi_ms  != null ? d.multi_ms  : '—';
+      const r = (d.single_ms > 0 && d.multi_ms > 0) ? d.single_ms / d.multi_ms : 0;
+      document.getElementById(pfx+'-v3').textContent = r > 0 ? `快了 ${r.toFixed(2)} 倍` : '—';
+      document.getElementById(pfx+'-bw').textContent =
+        `${d.bandwidth_single_gbps != null ? d.bandwidth_single_gbps : '—'} / ${d.bandwidth_multi_gbps != null ? d.bandwidth_multi_gbps : '—'}`;
+    }
   }
   [pfx+'-v1', pfx+'-v2', pfx+'-v3'].forEach(id => {
     const el = document.getElementById(id);
@@ -474,7 +503,16 @@ async function runNumaBench() {
     renderNuma('nu', U);
     const ins = document.getElementById('numaInsight');
     ins.style.display = 'block';
-    if (L.available && U.available) {
+    if (!L.available && U.available) {
+      // 預期情境：Limited = 單 node 綁定（本地快速存取），Unlimited = 跨 node（NUMA 延遲）
+      const lBw   = L.bandwidth_single_gbps != null ? L.bandwidth_single_gbps : '—';
+      const lMs   = L.single_ms != null ? L.single_ms : '—';
+      const lCpus = (L.allowed_cpus||[]).join(',') || '—';
+      ins.innerHTML =
+        `● CPU Limited（cpuset 單 node 綁定，CPU [${lCpus}]）→ 本地 DRAM 讀取 ${lMs} ms，頻寬 ${lBw} GB/s，<strong style="color:var(--unlim)">無跨節點延遲</strong><br>`+
+        `● CPU Unlimited（無 cpuset 限制）→ Node${U.node_a} ↔ Node${U.node_b}；本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）vs 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s），<strong style="color:var(--lim)">慢了 ${U.slowdown}x</strong><br>`+
+        `● 結論：正確的 NUMA 綁定（single-numa-node）使 Pod 記憶體存取全部落在本地 DRAM；未綁定的 Pod 因跨 QPI 存取遠端記憶體而損失 ${U.slowdown}x 頻寬。`;
+    } else if (L.available && U.available) {
       ins.innerHTML =
         `● NUMA ${L.total_numa_nodes} nodes | ${L.workers} 執行緒 × ${L.array_mb} MB 連續讀取 | 記憶體分配在 Node${L.node_a}，分別由 Node${L.node_a} / Node${L.node_b} CPU 存取<br>`+
         `● CPU Limited  — 本地 ${L.local_ms} ms（${L.bandwidth_local_gbps} GB/s）→ 跨 node ${L.remote_ms} ms（${L.bandwidth_remote_gbps} GB/s），跨 node 慢 ${L.slowdown}x<br>`+
@@ -483,7 +521,7 @@ async function runNumaBench() {
     } else {
       ins.innerHTML =
         `● container 內 CPU 只涵蓋單一 NUMA node — 無法展示跨 node 存取差異<br>`+
-        `● 已改為記憶體頻寬擴展測試：1 執行緒 vs ${L.workers} 執行緒讀取 ${L.array_mb||256} MB<br>`+
+        `● 已改為記憶體頻寬測試：讀取 ${L.array_mb||128} MB，可用 CPU：[${(L.allowed_cpus||[]).join(',')||'—'}]<br>`+
         `● 若要展示 NUMA 效能差異：設定 requests.cpu = limits.cpu（整數）並啟用 K8s CPU Manager (static) + Topology Manager (single-numa-node)`;
     }
     document.getElementById('numaStatus').textContent = '完成';
