@@ -17,8 +17,17 @@ app = Flask(__name__)
 
 POD_NAME = os.environ.get("POD_NAME", "unknown")
 HAS_LIMIT = os.environ.get("HAS_CPU_LIMIT", "false")
+_CPU_LIMIT_M = os.environ.get("CPU_LIMIT", "")   # millicores, injected by K8s downward API
 
 def get_cpu_limit_str():
+    # K8s downward API: exact configured limit (most reliable)
+    if _CPU_LIMIT_M:
+        try:
+            m = int(float(_CPU_LIMIT_M))
+            if m > 0:
+                return f"{m}m"
+        except (ValueError, TypeError):
+            pass
     # cgroup v2 CFS quota
     try:
         with open('/sys/fs/cgroup/cpu.max') as f:

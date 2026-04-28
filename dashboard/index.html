@@ -166,6 +166,7 @@
       <div class="bar-track"><div class="bar-fill unlim" id="buf" style="width:0%">—</div></div>
       <div class="spdup-wrap"><div class="spdup-badge spdup-neutral spdup-total" id="sf"><div class="spdup-num">—</div><div class="spdup-label">待測試</div></div></div>
     </div>
+    <div id="fibInsight" style="display:none;margin-top:16px;padding:14px 18px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:18px;line-height:1.9;color:var(--muted)"></div>
   </section>
 
   <section>
@@ -382,6 +383,7 @@ async function runThreadBench(){
       document.getElementById('threadStatus').textContent='錯誤';
       return;
     }
+    updateBadges(L,U);
     document.getElementById('tlpod').textContent=L.pod_name||'—';
     document.getElementById('tupod').textContent=U.pod_name||'—';
     document.getElementById('tl1').textContent=L.single_ms;
@@ -391,14 +393,15 @@ async function runThreadBench(){
     document.getElementById('tu4').textContent=U.multi_ms;
     document.getElementById('tus').textContent=fmtSpeedup(U.speedup);
     ['tl1','tl4','tls','tu1','tu4','tus'].forEach(id=>document.getElementById(id).classList.remove('ph'));
+    const workers=L.workers||U.workers||4;
     const ins=document.getElementById('threadInsight');
     ins.style.display='block';
     ins.innerHTML=
-      `● CPU Limited — 4 條執行緒效益：<span style="color:var(--lim)">${fmtSpeedup(L.speedup)}</span>（${limDesc(L.speedup)}）<br>`+
-      `● CPU Unlimited — 4 條執行緒效益：<span style="color:var(--unlim)">${fmtSpeedup(U.speedup)}</span>（可實際利用多核心）<br>`+
+      `● CPU Limited（<span style="color:var(--lim)">${fmtCpuLimit(L)}</span>）— ${workers} 條執行緒效益：<span style="color:var(--lim)">${fmtSpeedup(L.speedup)}</span>（${limDesc(L.speedup)}）<br>`+
+      `● CPU Unlimited（<span style="color:var(--unlim)">${fmtCpuLimit(U)}</span>）— ${workers} 條執行緒效益：<span style="color:var(--unlim)">${fmtSpeedup(U.speedup)}</span>（可實際利用多核心）<br>`+
       `● 結論：在 CPU Limited container 中，增加執行緒數無法提升效能，多核心優勢被 throttle 完全抵消。`;
     document.getElementById('threadStatus').textContent='完成';
-    log(`多執行緒 — 受限：1條=${L.single_ms}ms / 4條=${L.multi_ms}ms（${fmtSpeedup(L.speedup)}）| 無限制：1條=${U.single_ms}ms / 4條=${U.multi_ms}ms（${fmtSpeedup(U.speedup)}）`);
+    log(`多執行緒 — 受限（${fmtCpuLimit(L)}）：1條=${L.single_ms}ms / ${workers}條=${L.multi_ms}ms（${fmtSpeedup(L.speedup)}）| 無限制：1條=${U.single_ms}ms / ${workers}條=${U.multi_ms}ms（${fmtSpeedup(U.speedup)}）`);
   }catch(e){log('THREAD ERROR: '+e.message);}
   finally{document.getElementById('overlay').classList.remove('on');document.getElementById('threadBtn').disabled=false;}
 }
@@ -564,6 +567,11 @@ async function runBench(){
     histLbls.push('#'+runN);histL.push(L.total_elapsed_ms);histU.push(U.total_elapsed_ms);
     if(histLbls.length>10){histLbls.shift();histL.shift();histU.shift();}
     chart.update();
+    const fibIns=document.getElementById('fibInsight');
+    fibIns.style.display='block';
+    fibIns.innerHTML=
+      `● CPU Limited（<span style="color:var(--lim)">${fmtCpuLimit(L)}</span>）— 費氏數列 ${lb.fibonacci.elapsed_ms} ms<br>`+
+      `● CPU Unlimited（<span style="color:var(--unlim)">${fmtCpuLimit(U)}</span>）— 費氏數列 ${ub.fibonacci.elapsed_ms} ms`;
     log(`第 ${runN} 次完成 — 費氏數列 受限：${lb.fibonacci.elapsed_ms} 毫秒 | 無限制：${ub.fibonacci.elapsed_ms} 毫秒 | 受限${fmtSpeedup(lb.fibonacci.elapsed_ms/ub.fibonacci.elapsed_ms)}`);
   }catch(e){log('FETCH ERROR: '+e.message);}
   finally{document.getElementById('overlay').classList.remove('on');document.getElementById('runBtn').disabled=false;}
