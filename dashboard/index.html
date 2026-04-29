@@ -220,6 +220,10 @@
           <div class="badge" id="nl-badge">讀取中...</div>
         </div>
         <div id="nl-topo" style="font-family:var(--mono);font-size:15px;color:var(--muted);margin-bottom:16px">—</div>
+        <div class="metrics">
+          <div class="metric"><div class="m-label">本地存取時間</div><div class="m-value ph" id="nl-v1" style="font-size:36px">—</div><div class="m-unit">毫秒</div></div>
+          <div class="metric"><div class="m-label">跨 NUMA Node 存取時間</div><div class="m-value ph" id="nl-v2" style="font-size:36px">—</div><div class="m-unit">毫秒</div></div>
+        </div>
         <div class="total-row" style="margin-top:12px">
           <div class="t-label" id="nl-bw-label">記憶體頻寬（本地 / 跨 node）</div>
           <div><div class="t-value" id="nl-bw" style="font-size:26px">—</div><div class="m-unit">GB/s</div></div>
@@ -231,6 +235,10 @@
           <div class="badge" id="nu-badge">讀取中...</div>
         </div>
         <div id="nu-topo" style="font-family:var(--mono);font-size:15px;color:var(--muted);margin-bottom:16px">—</div>
+        <div class="metrics">
+          <div class="metric"><div class="m-label">本地存取時間</div><div class="m-value ph" id="nu-v1" style="font-size:36px">—</div><div class="m-unit">毫秒</div></div>
+          <div class="metric"><div class="m-label">跨 NUMA Node 存取時間</div><div class="m-value ph" id="nu-v2" style="font-size:36px">—</div><div class="m-unit">毫秒</div></div>
+        </div>
         <div class="total-row" style="margin-top:12px">
           <div class="t-label" id="nu-bw-label">記憶體頻寬（本地 / 跨 node）</div>
           <div><div class="t-value" id="nu-bw" style="font-size:26px">—</div><div class="m-unit">GB/s</div></div>
@@ -408,15 +416,20 @@ function renderNuma(pfx, d) {
     const fmtCpus = (arr) => (arr||[]).slice(0,4).join(',') + ((arr||[]).length > 4 ? '…' : '');
     document.getElementById(pfx+'-topo').textContent =
       `${d.total_numa_nodes} NUMA nodes | Node${d.node_a}:[${fmtCpus(d.node_a_cpus)}] ↔ Node${d.node_b}:[${fmtCpus(d.node_b_cpus)}] | ${d.workers} 執行緒 × ${d.array_mb} MB`;
+    document.getElementById(pfx+'-v1').textContent = d.local_ms  != null ? d.local_ms  : '—';
+    document.getElementById(pfx+'-v2').textContent = d.remote_ms != null ? d.remote_ms : '—';
     document.getElementById(pfx+'-bw-label').textContent = '記憶體頻寬（本地 / 跨 node）';
     document.getElementById(pfx+'-bw').textContent = `${d.bandwidth_local_gbps} / ${d.bandwidth_remote_gbps}`;
   } else {
     document.getElementById(pfx+'-topo').textContent =
       `⚠ 單一 NUMA node（偵測到 ${d.total_numa_nodes||1} node）| ${d.array_mb||128} MB | 可用 CPU: [${allowed.join(',')||'—'}]`;
+    document.getElementById(pfx+'-v1').textContent = d.single_ms != null ? d.single_ms : '—';
+    document.getElementById(pfx+'-v2').textContent = '—';
     document.getElementById(pfx+'-bw-label').textContent = '記憶體頻寬（本地 / 跨 node）';
     document.getElementById(pfx+'-bw').textContent =
       `${d.bandwidth_single_gbps != null ? d.bandwidth_single_gbps : '—'} / —`;
   }
+  [pfx+'-v1', pfx+'-v2'].forEach(id => document.getElementById(id).classList.remove('ph'));
 }
 
 async function runNumaBench() {
