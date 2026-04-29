@@ -34,6 +34,7 @@ spec:
       containers:
         - name: worker-limited
           image: quay.io/cooloo9871/cpu-bench-worker:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           env:
@@ -101,6 +102,7 @@ spec:
       containers:
         - name: worker-unlimited
           image: quay.io/cooloo9871/cpu-bench-worker:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           env:
