@@ -112,11 +112,6 @@ spec:
                   fieldPath: metadata.name
             - name: HAS_CPU_LIMIT
               value: "false"
-          resources:
-            requests:
-              memory: "512Mi"
-            limits:
-              memory: "3Gi"    # large enough for 2048 MB test array + latency chain
           readinessProbe:
             httpGet:
               path: /health
