@@ -162,6 +162,7 @@ spec:
       containers:
         - name: dashboard
           image: quay.io/cooloo9871/cpu-bench-dashboard:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 3000
           env:
