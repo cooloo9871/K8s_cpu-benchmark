@@ -220,13 +220,8 @@
           <div class="badge" id="nl-badge">讀取中...</div>
         </div>
         <div id="nl-topo" style="font-family:var(--mono);font-size:15px;color:var(--muted);margin-bottom:16px">—</div>
-        <div class="metrics">
-          <div class="metric"><div class="m-label" id="nl-l1">本地存取</div><div class="m-value ph" id="nl-v1" style="font-size:36px">—</div><div class="m-unit" id="nl-u1">毫秒</div></div>
-          <div class="metric"><div class="m-label" id="nl-l2">跨 Node 存取</div><div class="m-value ph" id="nl-v2" style="font-size:36px">—</div><div class="m-unit" id="nl-u2">毫秒</div></div>
-          <div class="metric"><div class="m-label" id="nl-l3">效能差異</div><div class="m-value ph" id="nl-v3" style="font-size:26px;white-space:nowrap">—</div><div class="m-unit">&nbsp;</div></div>
-        </div>
         <div class="total-row" style="margin-top:12px">
-          <div class="t-label">記憶體頻寬（本地 / 跨 node）</div>
+          <div class="t-label" id="nl-bw-label">記憶體頻寬（本地 / 跨 node）</div>
           <div><div class="t-value" id="nl-bw" style="font-size:26px">—</div><div class="m-unit">GB/s</div></div>
         </div>
       </div>
@@ -236,13 +231,8 @@
           <div class="badge" id="nu-badge">讀取中...</div>
         </div>
         <div id="nu-topo" style="font-family:var(--mono);font-size:15px;color:var(--muted);margin-bottom:16px">—</div>
-        <div class="metrics">
-          <div class="metric"><div class="m-label" id="nu-l1">本地存取</div><div class="m-value ph" id="nu-v1" style="font-size:36px">—</div><div class="m-unit" id="nu-u1">毫秒</div></div>
-          <div class="metric"><div class="m-label" id="nu-l2">跨 Node 存取</div><div class="m-value ph" id="nu-v2" style="font-size:36px">—</div><div class="m-unit" id="nu-u2">毫秒</div></div>
-          <div class="metric"><div class="m-label" id="nu-l3">效能差異</div><div class="m-value ph" id="nu-v3" style="font-size:26px;white-space:nowrap">—</div><div class="m-unit">&nbsp;</div></div>
-        </div>
         <div class="total-row" style="margin-top:12px">
-          <div class="t-label">記憶體頻寬（本地 / 跨 node）</div>
+          <div class="t-label" id="nu-bw-label">記憶體頻寬（本地 / 跨 node）</div>
           <div><div class="t-value" id="nu-bw" style="font-size:26px">—</div><div class="m-unit">GB/s</div></div>
         </div>
       </div>
@@ -408,87 +398,25 @@ async function runThreadBench(){
 
 function renderNuma(pfx, d) {
   document.getElementById(pfx+'-pod').textContent = d.pod_name || '—';
-  const _allTopo = (d.node_a_cpus||[]).length + (d.node_b_cpus||[]).length;
-  const _allowed = d.allowed_cpus || [];
-  const _badgeTxt = (_allowed.length > 0 && _allowed.length < _allTopo)
-    ? `cpuset: [${_allowed.join(', ')}]`
+  const hasCpuset = d.cpuset_active === true;
+  const allowed = d.allowed_cpus || [];
+  document.getElementById(pfx+'-badge').textContent = hasCpuset
+    ? `cpuset: [${allowed.join(', ')}]`
     : '未設定 CPU 綁定';
-  document.getElementById(pfx+'-badge').textContent = _badgeTxt;
+
   if (d.available) {
     const fmtCpus = (arr) => (arr||[]).slice(0,4).join(',') + ((arr||[]).length > 4 ? '…' : '');
-
-    // Build CPU number → NUMA node lookup so we can annotate actual CPUs
-    const cpuToNode = {};
-    (d.node_a_cpus||[]).forEach(c => { cpuToNode[c] = d.node_a; });
-    (d.node_b_cpus||[]).forEach(c => { cpuToNode[c] = d.node_b; });
-
-    // affinity_ok===false: threads ran on overlapping cores → unreliable result.
-    // undefined (old backend) treated as OK to avoid false warnings.
-    const afOk = d.affinity_ok !== false;
-
-    const fmtThreadDesc = (threadCpus, memNode) => {
-      if (!threadCpus || !threadCpus.length) return '';
-      if (!afOk) return `<br><span style="font-size:13px;color:var(--lim);text-transform:none">⚠ 綁核失敗</span>`;
-      const n = threadCpus.length;
-      const node = cpuToNode[threadCpus[0]] !== undefined ? cpuToNode[threadCpus[0]] : '?';
-      const isLocal = memNode !== undefined && String(node) === String(memNode);
-      const locality = isLocal
-        ? `與記憶體同在 Node${node}`
-        : `跨節點讀取 Node${memNode} 記憶體`;
-      const cpuList = threadCpus.join(', ');
-      return `<br><span style="font-size:13px;opacity:.7;text-transform:none;letter-spacing:.03em">Node${node} 共 ${n} 核，每核 1 執行緒（CPU ${cpuList}），${locality}</span>`;
-    };
-
     document.getElementById(pfx+'-topo').textContent =
       `${d.total_numa_nodes} NUMA nodes | Node${d.node_a}:[${fmtCpus(d.node_a_cpus)}] ↔ Node${d.node_b}:[${fmtCpus(d.node_b_cpus)}] | ${d.workers} 執行緒 × ${d.array_mb} MB`;
-    document.getElementById(pfx+'-l1').innerHTML = `本地存取${fmtThreadDesc(d.local_thread_cpus || d.actual_local_cpus, d.node_a)}`;
-    document.getElementById(pfx+'-l2').innerHTML = `跨 Node 存取${fmtThreadDesc(d.remote_thread_cpus || d.actual_remote_cpus, d.node_a)}`;
-    document.getElementById(pfx+'-l3').textContent = '效能損失';
-    document.getElementById(pfx+'-v1').textContent = d.local_ms;
-    document.getElementById(pfx+'-v2').textContent = d.remote_ms;
-    const s = d.slowdown || 0;
-    const ftOk = d.first_touch_in_node_a !== false; // false = arr pages on wrong node
-    document.getElementById(pfx+'-v3').textContent =
-      s <= 0    ? '—' :
-      !afOk     ? `⚠ 綁核失敗，數值不可靠` :
-      !ftOk     ? `⚠ 記憶體初始化在錯誤 Node，本地/遠端標籤對調` :
-      s >= 1.05 ? `慢了 ${s.toFixed(2)} 倍` :
-      s <= 0.95 ? `⚠ 遠端更快 ${(1/s).toFixed(2)} 倍（量測異常）` :
-                  '≈ 相同';
+    document.getElementById(pfx+'-bw-label').textContent = '記憶體頻寬（本地 / 跨 node）';
     document.getElementById(pfx+'-bw').textContent = `${d.bandwidth_local_gbps} / ${d.bandwidth_remote_gbps}`;
   } else {
-    const w = d.workers || 1;
     document.getElementById(pfx+'-topo').textContent =
-      `⚠ 單一 NUMA node（偵測到 ${d.total_numa_nodes||1} node）| ${d.array_mb||128} MB 頻寬測試 | 可用 CPU: [${(d.allowed_cpus||[]).join(',')||'—'}]`;
-    if (w <= 1) {
-      // 1 core cpuset：只能跑 1 條執行緒，改為展示本地 DRAM 單執行緒頻寬
-      document.getElementById(pfx+'-l1').textContent = '本地讀取時間';
-      document.getElementById(pfx+'-l2').textContent = '本地記憶體頻寬';
-      document.getElementById(pfx+'-l3').textContent = 'NUMA 狀態';
-      document.getElementById(pfx+'-u1').textContent = '毫秒';
-      document.getElementById(pfx+'-u2').textContent = 'GB/s';
-      document.getElementById(pfx+'-v1').textContent = d.single_ms != null ? d.single_ms : '—';
-      document.getElementById(pfx+'-v2').textContent = d.bandwidth_single_gbps != null ? d.bandwidth_single_gbps : '—';
-      document.getElementById(pfx+'-v3').textContent = '本地 Node 綁定，無跨節點延遲';
-      document.getElementById(pfx+'-bw').textContent =
-        `${d.bandwidth_single_gbps != null ? d.bandwidth_single_gbps : '—'} / —`;
-    } else {
-      document.getElementById(pfx+'-l1').textContent = '1 條執行緒';
-      document.getElementById(pfx+'-l2').textContent = `${w} 條執行緒`;
-      document.getElementById(pfx+'-l3').textContent = '頻寬擴展';
-      document.getElementById(pfx+'-u2').textContent = '毫秒';
-      document.getElementById(pfx+'-v1').textContent = d.single_ms != null ? d.single_ms : '—';
-      document.getElementById(pfx+'-v2').textContent = d.multi_ms  != null ? d.multi_ms  : '—';
-      const r = (d.single_ms > 0 && d.multi_ms > 0) ? d.single_ms / d.multi_ms : 0;
-      document.getElementById(pfx+'-v3').textContent = r > 0 ? `快了 ${r.toFixed(2)} 倍` : '—';
-      document.getElementById(pfx+'-bw').textContent =
-        `${d.bandwidth_single_gbps != null ? d.bandwidth_single_gbps : '—'} / ${d.bandwidth_multi_gbps != null ? d.bandwidth_multi_gbps : '—'}`;
-    }
+      `⚠ 單一 NUMA node（偵測到 ${d.total_numa_nodes||1} node）| ${d.array_mb||128} MB | 可用 CPU: [${allowed.join(',')||'—'}]`;
+    document.getElementById(pfx+'-bw-label').textContent = '記憶體頻寬（本地 / 跨 node）';
+    document.getElementById(pfx+'-bw').textContent =
+      `${d.bandwidth_single_gbps != null ? d.bandwidth_single_gbps : '—'} / —`;
   }
-  [pfx+'-v1', pfx+'-v2', pfx+'-v3'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.classList.remove('ph');
-  });
 }
 
 async function runNumaBench() {

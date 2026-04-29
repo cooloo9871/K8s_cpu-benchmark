@@ -297,6 +297,9 @@ def _bench_numa_impl():
         if avail:
             node_cpus[nid] = avail
 
+    total_system_cpus = sum(len(v) for v in numa_map.values())
+    cpuset_active = len(allowed) < total_system_cpus
+
     array_mb = 128
     n = (array_mb * 1024 * 1024) // 8  # number of float64 elements
 
@@ -412,6 +415,7 @@ def _bench_numa_impl():
             "bandwidth_local_gbps": bw_local,
             "bandwidth_remote_gbps": bw_remote,
             "allowed_cpus": allowed,
+            "cpuset_active": cpuset_active,
             "pod_name": POD_NAME,
             "has_cpu_limit": HAS_LIMIT,
             "cpu_limit": get_cpu_limit_str(),
@@ -450,6 +454,7 @@ def _bench_numa_impl():
             "reason": "container CPUs only span 1 NUMA node — showing bandwidth scaling instead",
             "total_numa_nodes": len(numa_map),
             "allowed_cpus": allowed,
+            "cpuset_active": cpuset_active,
             "array_mb": array_mb,
             "workers": workers,
             "single_ms": single_ms,
