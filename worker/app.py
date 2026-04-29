@@ -58,6 +58,67 @@ def get_cpu_limit_str():
         pass
     return None
 
+def get_cpu_limit():
+    """Return CPU limit as int (whole cores) or float (fractions), or None.
+    Reads /proc/self/cgroup to discover the container's actual cgroup subpath,
+    then checks cpu.max (cgroup v2) or cpu.cfs_quota_us (cgroup v1) at that
+    specific path — necessary when the kernel sets the quota on a parent cgroup
+    rather than at the root of the mount visible to the container."""
+
+    cgroup_v2_sub = None
+    cgroup_v1_sub = None
+    try:
+        with open('/proc/self/cgroup') as f:
+            for line in f:
+                parts = line.strip().split(':', 2)
+                if len(parts) != 3:
+                    continue
+                hid, controllers, path = parts
+                path = path.rstrip('/')
+                if hid == '0' and controllers == '':
+                    cgroup_v2_sub = path        # cgroup v2 unified hierarchy
+                elif 'cpu' in controllers.split(',') and cgroup_v1_sub is None:
+                    cgroup_v1_sub = path         # cgroup v1 cpu controller
+    except Exception:
+        pass
+
+    def _cores(quota, period):
+        c = quota / period
+        return int(c) if c >= 1 and c == int(c) else round(c, 2)
+
+    # ── cgroup v2 ─────────────────────────────────────────────────────────
+    v2_bases = ['/sys/fs/cgroup']
+    if cgroup_v2_sub:
+        v2_bases.insert(0, '/sys/fs/cgroup' + cgroup_v2_sub)
+    for base in v2_bases:
+        try:
+            with open(f'{base}/cpu.max') as f:
+                parts = f.read().strip().split()
+            if len(parts) >= 2 and parts[0] != 'max':
+                return _cores(int(parts[0]), int(parts[1]))
+        except Exception:
+            pass
+
+    # ── cgroup v1 ─────────────────────────────────────────────────────────
+    v1_dirs = []
+    for ctrl in ['cpu', 'cpu,cpuacct']:
+        if cgroup_v1_sub:
+            v1_dirs.append(f'/sys/fs/cgroup/{ctrl}{cgroup_v1_sub}')
+        v1_dirs.append(f'/sys/fs/cgroup/{ctrl}')
+    for d in v1_dirs:
+        try:
+            with open(f'{d}/cpu.cfs_quota_us') as f:
+                quota = int(f.read().strip())
+            if quota == -1:
+                continue
+            with open(f'{d}/cpu.cfs_period_us') as f:
+                period = int(f.read().strip())
+            return _cores(quota, period)
+        except Exception:
+            pass
+
+    return None
+
 def is_prime(n):
     if n < 2:
         return False
@@ -110,6 +171,7 @@ def info():
         "pod_name": POD_NAME,
         "has_cpu_limit": HAS_LIMIT,
         "cpu_limit": get_cpu_limit_str(),
+        "cpu_limit_cores": get_cpu_limit(),
         "cpus_allowed": cpus_allowed,
         "total_system_cpus": total,
         "cpuset_active": len(cpus_allowed) < total,
@@ -182,6 +244,7 @@ def bench_all():
         "pod_name": POD_NAME,
         "has_cpu_limit": HAS_LIMIT,
         "cpu_limit": get_cpu_limit_str(),
+        "cpu_limit_cores": get_cpu_limit(),
         "cpus_allowed": cpus_allowed,
         "total_system_cpus": total,
         "cpuset_active": len(cpus_allowed) < total,
@@ -218,6 +281,7 @@ def bench_threads():
         "pod_name": POD_NAME,
         "has_cpu_limit": HAS_LIMIT,
         "cpu_limit": get_cpu_limit_str(),
+        "cpu_limit_cores": get_cpu_limit(),
         "cpus_allowed": cpus_allowed,
         "total_system_cpus": total,
         "cpuset_active": len(cpus_allowed) < total,

@@ -313,21 +313,32 @@ function parseCpuList(s) {
   return cpus;
 }
 
-// Returns badge label for a worker response:
-//   cpuset_active=true  → K8s CPU Manager pinned cores  → "cpuset: [2]"
-//   cpuset_active=false + cpu_limit set → CFS quota      → "limits.cpu: 100m"
-//   nothing set                                           → "未設定 CPU Limit"
+// Returns badge label for a worker response (non-NUMA sections only):
+//   cpu_limit_cores set → "limits.cpu: N"  (numeric, from cgroup path discovery)
+//   cpu_limit string    → "limits.cpu: Nm" (raw fallback, e.g. "100m")
+//   neither set         → "未設定 CPU Limit"
 function fmtCpuLimit(d) {
   if (!d) return '未設定 CPU Limit';
-  // CPU Manager static policy: cpuset_active=true means fewer CPUs than total
-  if (d.cpuset_active && Array.isArray(d.cpus_allowed) && d.cpus_allowed.length > 0)
-    return `cpuset: [${d.cpus_allowed.join(', ')}]`;
-  // CFS quota (limits.cpu: 100m, 500m, etc.)
-  if (d.cpu_limit && !d.cpu_limit.startsWith('cpuset:'))
-    return `limits.cpu: ${d.cpu_limit}`;
-  // Legacy: old cpu_limit="cpuset:2" format before cpus_allowed field existed
-  if (d.cpu_limit && d.cpu_limit.startsWith('cpuset:'))
-    return `cpuset: [${d.cpu_limit.slice(7)}]`;
+  // primary: numeric cores from get_cpu_limit() (cgroup path-aware)
+  if (d.cpu_limit_cores != null) {
+    const c = d.cpu_limit_cores;
+    // < 1 core → show millicores (e.g. 0.1 → "100m"); ≥ 1 core → show integer
+    return c >= 1 ? `limits.cpu: ${c}` : `limits.cpu: ${Math.round(c * 1000)}m`;
+  }
+  // fallback: raw string from get_cpu_limit_str() e.g. "100m", "1000m"
+  const cl = d.cpu_limit;
+  if (cl && !cl.startsWith('cpuset:')) {
+    if (cl.endsWith('m')) {
+      const m = parseInt(cl, 10);
+      if (!isNaN(m)) {
+        // ≥ 1000m: convert to whole cores; < 1000m: keep millicores as-is
+        return m >= 1000 && m % 1000 === 0
+          ? `limits.cpu: ${m / 1000}`
+          : `limits.cpu: ${m}m`;
+      }
+    }
+    return `limits.cpu: ${cl}`;
+  }
   return '未設定 CPU Limit';
 }
 
@@ -355,10 +366,7 @@ function updateBadges(limited, unlimited){
     const txt = fmtCpuLimit(limited);
     setBadge('lim-badge', txt);
     setBadge('tl-badge',  txt);
-    // Legend suffix: show pinned CPUs or CFS quota value, not all allowed CPUs
-    const legDetail = limited.cpuset_active
-      ? (Array.isArray(limited.cpus_allowed) ? limited.cpus_allowed.join(',') : '')
-      : (limited.cpu_limit || '');
+    const legDetail = limited.cpu_limit_cores != null ? `${limited.cpu_limit_cores} cores` : '';
     document.getElementById('leg-lim').textContent =
       legDetail ? `CPU Limited (${legDetail})` : 'CPU Limited';
   }
