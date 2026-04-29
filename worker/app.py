@@ -9,7 +9,7 @@ import math
 import threading
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from datetime import datetime
 from pathlib import Path
 
@@ -104,10 +104,15 @@ def health():
 
 @app.route("/info")
 def info():
+    _, cpus_allowed = get_cpus_allowed()
+    total = os.cpu_count() or 1
     return jsonify({
         "pod_name": POD_NAME,
         "has_cpu_limit": HAS_LIMIT,
         "cpu_limit": get_cpu_limit_str(),
+        "cpus_allowed": cpus_allowed,
+        "total_system_cpus": total,
+        "cpuset_active": len(cpus_allowed) < total,
         "timestamp": datetime.utcnow().isoformat()
     })
 
@@ -171,10 +176,15 @@ def bench_all():
         "description": "Recursive fibonacci(36)"
     }
 
+    _, cpus_allowed = get_cpus_allowed()
+    total = os.cpu_count() or 1
     return jsonify({
         "pod_name": POD_NAME,
         "has_cpu_limit": HAS_LIMIT,
         "cpu_limit": get_cpu_limit_str(),
+        "cpus_allowed": cpus_allowed,
+        "total_system_cpus": total,
+        "cpuset_active": len(cpus_allowed) < total,
         "total_elapsed_ms": fib_ms,
         "benchmarks": results,
         "timestamp": datetime.utcnow().isoformat()
@@ -195,6 +205,8 @@ def bench_threads():
         list(executor.map(_numpy_matrix_work, range(tasks)))
     multi_ms = round((time.perf_counter() - start) * 1000, 2)
 
+    _, cpus_allowed = get_cpus_allowed()
+    total = os.cpu_count() or 1
     return jsonify({
         "task": "thread_compare",
         "workload": "numpy 500x500 matmul x8",
@@ -206,6 +218,9 @@ def bench_threads():
         "pod_name": POD_NAME,
         "has_cpu_limit": HAS_LIMIT,
         "cpu_limit": get_cpu_limit_str(),
+        "cpus_allowed": cpus_allowed,
+        "total_system_cpus": total,
+        "cpuset_active": len(cpus_allowed) < total,
         "timestamp": datetime.utcnow().isoformat()
     })
 
@@ -223,6 +238,25 @@ def _parse_cpulist(s):
         else:
             cpus.append(int(part))
     return cpus
+
+def get_cpus_allowed():
+    """Return (raw_str, sorted_list) of CPUs this process may run on.
+    Reads Cpus_allowed_list from /proc/self/status; falls back to sched_getaffinity."""
+    try:
+        with open('/proc/self/status') as f:
+            for line in f:
+                if line.startswith('Cpus_allowed_list:'):
+                    raw = line.split(':', 1)[1].strip()
+                    return raw, sorted(_parse_cpulist(raw))
+    except Exception:
+        pass
+    try:
+        cpus = sorted(os.sched_getaffinity(0))
+        return ','.join(str(c) for c in cpus), cpus
+    except (AttributeError, OSError):
+        pass
+    total = os.cpu_count() or 1
+    return f"0-{total-1}", list(range(total))
 
 def get_numa_cpu_map():
     """Returns {node_id: [cpu_ids]} from /sys/devices/system/node/."""
@@ -267,10 +301,56 @@ def _stream_chunk(args):
     cpu = _get_thread_cpu()
     return val, cpu
 
+# ── Latency test helpers ──────────────────────────────────────────────────────
+
+_LAT_STEPS = 100_000  # pointer-chase iterations per latency measurement
+
+def _build_pointer_chain(n):
+    """Random permutation as pointer-chase chain (arr[i] = next index to visit)."""
+    rng = np.random.default_rng()
+    return rng.permutation(n).astype(np.int64)
+
+def _chase_ns(chain, steps):
+    """Sequential pointer chase — each access depends on the previous result,
+    defeating the hardware prefetcher.  Returns (ns_per_step, final_idx)."""
+    idx = 0
+    t = time.perf_counter_ns()
+    for _ in range(steps):
+        idx = int(chain[idx])
+    return (time.perf_counter_ns() - t) / steps, idx
+
+def _lat_worker(args):
+    """Thread target: pin to cpuset, estimate DRAM latency via pointer chasing.
+    Subtracts L1-cache baseline (= pure Python loop overhead) to isolate
+    memory latency.  Returns (dram_latency_ns, dummy_int)."""
+    chain_large, cpuset = args
+    if cpuset:
+        try:
+            os.sched_setaffinity(0, cpuset)
+        except (OSError, PermissionError, AttributeError):
+            pass
+
+    # 256-element chain (2 KB) fits in L1 — measures Python overhead only
+    chain_small = _build_pointer_chain(256)
+
+    steps = _LAT_STEPS
+    # Warm-up: trigger page faults on large chain, prime L1 for small chain
+    _chase_ns(chain_large, min(5_000, len(chain_large)))
+    _chase_ns(chain_small, 30_000)
+
+    large_ns, d1 = _chase_ns(chain_large, steps)
+    # 3× steps for a stable Python-overhead baseline
+    small_ns, d2 = _chase_ns(chain_small, steps * 3)
+
+    # DRAM contribution ≈ large − small (both include identical Python overhead)
+    return round(max(1.0, large_ns - small_ns), 1), d1 ^ d2
+
 @app.route("/bench/numa")
 def bench_numa():
     try:
-        return _bench_numa_impl()
+        array_mb = int(request.args.get('size_mb', 1024))
+        array_mb = max(64, min(2048, array_mb))
+        return _bench_numa_impl(array_mb)
     except Exception as exc:
         return jsonify({
             "available": False,
@@ -282,7 +362,7 @@ def bench_numa():
             "timestamp": datetime.utcnow().isoformat()
         })
 
-def _bench_numa_impl():
+def _bench_numa_impl(array_mb=1024):
     numa_map = get_numa_cpu_map()
     try:
         allowed = sorted(os.sched_getaffinity(0))
@@ -300,7 +380,6 @@ def _bench_numa_impl():
     total_system_cpus = sum(len(v) for v in numa_map.values())
     cpuset_active = len(allowed) < total_system_cpus
 
-    array_mb = 128
     n = (array_mb * 1024 * 1024) // 8  # number of float64 elements
 
     def run_pass(executor, chunks, cpu_list):
@@ -384,6 +463,27 @@ def _bench_numa_impl():
             actual_local_cpus  = sorted(local_cpus_seen)
             actual_remote_cpus = sorted(remote_cpus_seen)
 
+            # ── Pointer-chase latency test ────────────────────────────────────
+            # 64 MB chain beats any common L3 (≤ 64 MB on most servers).
+            # Allocate in-place inside the thread → single allocation, no copy.
+            lat_mb = 64
+            lat_n  = (lat_mb * 1024 * 1024) // 8
+
+            def _init_lat_chain(_):
+                try:
+                    os.sched_setaffinity(0, {cpus_a[0]})
+                except Exception:
+                    pass
+                chain = np.arange(lat_n, dtype=np.int64)
+                np.random.default_rng().shuffle(chain)
+                return chain
+
+            lat_chain = ex.submit(_init_lat_chain, None).result()
+
+            local_lat_ns,  _ = ex.submit(_lat_worker, (lat_chain, {cpus_a[0]})).result()
+            remote_lat_ns, _ = ex.submit(_lat_worker, (lat_chain, {cpus_b[0]})).result()
+            lat_ratio = round(remote_lat_ns / local_lat_ns, 2) if local_lat_ns > 0 else 0
+
         # affinity_ok=False: worker threads ran on overlapping cores → unreliable.
         # first_touch_in_node_a=False: arr pages landed on the wrong node →
         #   "local" is actually cross-QPI and "remote" is actually local → labels swapped.
@@ -414,6 +514,10 @@ def _bench_numa_impl():
             "slowdown": slowdown,
             "bandwidth_local_gbps": bw_local,
             "bandwidth_remote_gbps": bw_remote,
+            "local_lat_ns": local_lat_ns,
+            "remote_lat_ns": remote_lat_ns,
+            "lat_ratio": lat_ratio,
+            "lat_array_mb": lat_mb,
             "allowed_cpus": allowed,
             "cpuset_active": cpuset_active,
             "pod_name": POD_NAME,
@@ -448,6 +552,13 @@ def _bench_numa_impl():
         bw_single = round(array_mb / 1024 / (single_ms / 1000), 2) if single_ms > 0 else 0
         bw_multi  = round(array_mb / 1024 / (multi_ms  / 1000), 2) if multi_ms  > 0 else 0
 
+        # Latency test (single node — local only, no cross-node measurement)
+        lat_mb = 64
+        lat_n  = (lat_mb * 1024 * 1024) // 8
+        lat_chain = np.arange(lat_n, dtype=np.int64)
+        np.random.default_rng().shuffle(lat_chain)
+        local_lat_ns, _ = _lat_worker((lat_chain, None))
+
         return jsonify({
             "available": False,
             "mode": "single_numa",
@@ -461,6 +572,10 @@ def _bench_numa_impl():
             "multi_ms": multi_ms,
             "bandwidth_single_gbps": bw_single,
             "bandwidth_multi_gbps": bw_multi,
+            "local_lat_ns": local_lat_ns,
+            "remote_lat_ns": None,
+            "lat_ratio": None,
+            "lat_array_mb": lat_mb,
             "pod_name": POD_NAME,
             "has_cpu_limit": HAS_LIMIT,
             "cpu_limit": get_cpu_limit_str(),

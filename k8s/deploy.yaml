@@ -47,10 +47,10 @@ spec:
           resources:
             requests:
               cpu: "100m"
-              memory: "128Mi"
+              memory: "512Mi"
             limits:
               cpu: "100m"      # <-- THE KEY CONSTRAINT: throttled to 0.1 core
-              memory: "256Mi"
+              memory: "3Gi"    # large enough for 2048 MB test array + latency chain
           readinessProbe:
             httpGet:
               path: /health
@@ -112,6 +112,11 @@ spec:
                   fieldPath: metadata.name
             - name: HAS_CPU_LIMIT
               value: "false"
+          resources:
+            requests:
+              memory: "512Mi"
+            limits:
+              memory: "3Gi"    # large enough for 2048 MB test array + latency chain
           readinessProbe:
             httpGet:
               path: /health

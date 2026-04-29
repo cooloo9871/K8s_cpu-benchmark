@@ -67,20 +67,22 @@ class Handler(SimpleHTTPRequestHandler):
             t1.start(); t2.start()
             t1.join();  t2.join()
             self.send_json(200, results)
-        elif self.path == "/api/numa_bench":
+        elif self.path.startswith("/api/numa_bench"):
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            size_mb = qs.get("size_mb", ["1024"])[0]
             results = {}
             def run_numa(url, key, label):
                 try:
-                    with urllib.request.urlopen(f"{url}/bench/numa", timeout=120) as r:
+                    with urllib.request.urlopen(f"{url}/bench/numa?size_mb={size_mb}", timeout=300) as r:
                         data = json.loads(r.read())
                         data["label"] = label
                         results[key] = data
                 except Exception as e:
                     results[key] = {"label": label, "error": str(e)}
-            t1 = threading.Thread(target=run_numa, args=(LIMITED_URL,   "limited",   "CPU Limited"))
-            t2 = threading.Thread(target=run_numa, args=(UNLIMITED_URL, "unlimited", "CPU Unlimited"))
-            t1.start(); t2.start()
-            t1.join();  t2.join()
+            # Sequential execution: Limited first, then Unlimited — avoids bandwidth interference
+            run_numa(LIMITED_URL,   "limited",   "CPU Limited")
+            run_numa(UNLIMITED_URL, "unlimited", "CPU Unlimited")
             self.send_json(200, results)
         elif self.path == "/api/health":
             self.send_json(200, {"status": "ok"})
