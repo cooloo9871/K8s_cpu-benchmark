@@ -322,7 +322,7 @@ def _bench_numa_impl():
         node_ids = sorted(node_cpus.keys())
         cpus_a   = node_cpus[node_ids[0]]
         cpus_b   = node_cpus[node_ids[1]]
-        workers  = min(len(cpus_a), len(cpus_b))
+        workers  = 1  # fixed 1 thread per side: eliminates thread-count variable from bandwidth comparison
 
         # Use np.empty so no pages are faulted yet (demand-paged).
         # np.ones() would first-touch in the main thread, whose sched_setaffinity

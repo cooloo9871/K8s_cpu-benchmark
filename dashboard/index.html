@@ -414,15 +414,21 @@ function renderNuma(pfx, d) {
 
   if (d.available) {
     const fmtCpus = (arr) => (arr||[]).slice(0,4).join(',') + ((arr||[]).length > 4 ? '…' : '');
-    document.getElementById(pfx+'-topo').textContent =
-      `${d.total_numa_nodes} NUMA nodes | Node${d.node_a}:[${fmtCpus(d.node_a_cpus)}] ↔ Node${d.node_b}:[${fmtCpus(d.node_b_cpus)}] | ${d.workers} 執行緒 × ${d.array_mb} MB`;
+    const affinityTag = d.affinity_ok === false
+      ? ' <span style="color:var(--accent)">⚠ affinity 未生效</span>'
+      : (d.affinity_ok === true ? ' <span style="color:var(--unlim)">✓ affinity OK</span>' : '');
+    const touchTag = d.first_touch_in_node_a === false
+      ? ' <span style="color:var(--lim)">⚠ first-touch 節點異常</span>' : '';
+    document.getElementById(pfx+'-topo').innerHTML =
+      `${d.total_numa_nodes} NUMA nodes | Node${d.node_a}:[${fmtCpus(d.node_a_cpus)}] ↔ Node${d.node_b}:[${fmtCpus(d.node_b_cpus)}] | 1 執行緒 × ${d.array_mb} MB`+
+      affinityTag + touchTag;
     document.getElementById(pfx+'-v1').textContent = d.local_ms  != null ? d.local_ms  : '—';
     document.getElementById(pfx+'-v2').textContent = d.remote_ms != null ? d.remote_ms : '—';
     document.getElementById(pfx+'-bw-label').textContent = '記憶體頻寬（本地 / 跨 node）';
     document.getElementById(pfx+'-bw').textContent = `${d.bandwidth_local_gbps} / ${d.bandwidth_remote_gbps}`;
   } else {
     document.getElementById(pfx+'-topo').textContent =
-      `⚠ 單一 NUMA node（偵測到 ${d.total_numa_nodes||1} node）| ${d.array_mb||128} MB | 可用 CPU: [${allowed.join(',')||'—'}]`;
+      `⚠ 單一 NUMA node（偵測到 ${d.total_numa_nodes||1} node）| ${d.array_mb||128} MB，1 執行緒 | 可用 CPU: [${allowed.join(',')||'—'}]`;
     document.getElementById(pfx+'-v1').textContent = d.single_ms != null ? d.single_ms : '—';
     document.getElementById(pfx+'-v2').textContent = '—';
     document.getElementById(pfx+'-bw-label').textContent = '記憶體頻寬（本地 / 跨 node）';
@@ -460,24 +466,46 @@ async function runNumaBench() {
     const ins = document.getElementById('numaInsight');
     ins.style.display = 'block';
     if (!L.available && U.available) {
-      // 預期情境：Limited = 單 node 綁定（本地快速存取），Unlimited = 跨 node（NUMA 延遲）
+      // 典型 VM 情境：Limited = cpuset 單核（single_numa，1 執行緒）；Unlimited = 跨 node（cross_numa，1 執行緒）
       const lBw   = L.bandwidth_single_gbps != null ? L.bandwidth_single_gbps : '—';
       const lMs   = L.single_ms != null ? L.single_ms : '—';
       const lCpus = (L.allowed_cpus||[]).join(',') || '—';
+      const uSlowdownOk = U.slowdown > 1.05;
+      const crossFasterNote = U.bandwidth_remote_gbps > U.bandwidth_local_gbps
+        ? `<br>⚠ <span style="color:var(--accent)">跨 node 頻寬（${U.bandwidth_remote_gbps} GB/s）反而比本地（${U.bandwidth_local_gbps} GB/s）快 — `+
+          `VM 環境常見現象：容器缺少 SYS_NICE 權限導致 sched_setaffinity() 靜默失效，執行緒並未真正綁到指定 CPU，`+
+          `local/remote 標籤測到的是 OS 隨機排程結果而非真實 NUMA 拓撲。</span>` : '';
+      const affinityNote = U.affinity_ok === false
+        ? `<br>⚠ <span style="color:var(--accent)">affinity 診斷：local/remote 執行緒跑在重疊的核心上，頻寬差異不可信。</span>` : '';
+      const touchNote = U.first_touch_in_node_a === false
+        ? `<br>⚠ <span style="color:var(--lim)">first-touch 未落在 Node${U.node_a}，記憶體頁面可能在錯誤節點，local/remote 標籤可能互換。</span>` : '';
       ins.innerHTML =
-        `● CPU Limited（cpuset 單 node 綁定，CPU [${lCpus}]）→ 本地 DRAM 讀取 ${lMs} ms，頻寬 ${lBw} GB/s，<strong style="color:var(--unlim)">無跨節點延遲</strong><br>`+
-        `● CPU Unlimited（無 cpuset 限制）→ Node${U.node_a} ↔ Node${U.node_b}；本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）vs 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s），<strong style="color:var(--lim)">慢了 ${U.slowdown}x</strong><br>`+
-        `● 結論：正確的 NUMA 綁定（single-numa-node）使 Pod 記憶體存取全部落在本地 DRAM；未綁定的 Pod 因跨 QPI 存取遠端記憶體而損失 ${U.slowdown}x 頻寬。`;
+        `● CPU Limited（cpuset 只有 CPU [${lCpus}]，屬單一 NUMA node，<strong>1 執行緒</strong>）→ 本地讀取 128MB：${lMs} ms，頻寬 ${lBw} GB/s<br>`+
+        `● CPU Unlimited（無 cpuset，跨 Node${U.node_a}+Node${U.node_b}，各 <strong>1 執行緒</strong>）→ 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）vs 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s）`+
+        (uSlowdownOk
+          ? `，<strong style="color:var(--lim)">跨 node 慢 ${U.slowdown}x</strong>`
+          : `，差異不顯著（slowdown=${U.slowdown}x）`)+
+        crossFasterNote + affinityNote + touchNote +
+        `<br>● 兩側均使用 <strong>1 執行緒</strong>（公平對比，已排除執行緒數差異）。`+
+        (uSlowdownOk
+          ? ` NUMA 綁定使 CPU Limited Pod 所有記憶體存取集中在本地 DRAM，無跨 QPI 延遲。`
+          : ` 若 slowdown ≈ 1.0，表示此 VM 的 NUMA 拓撲為虛擬拓撲，不代表真實 QPI 延遲差異。`);
     } else if (L.available && U.available) {
+      const lCrossNote = L.bandwidth_remote_gbps > L.bandwidth_local_gbps
+        ? ` <span style="color:var(--accent)">⚠ 跨 node 反而快，affinity 可能未生效</span>` : `，跨 node 慢 ${L.slowdown}x`;
+      const uCrossNote = U.bandwidth_remote_gbps > U.bandwidth_local_gbps
+        ? ` <span style="color:var(--accent)">⚠ 跨 node 反而快，affinity 可能未生效</span>` : `，跨 node 慢 ${U.slowdown}x`;
+      const affinityWarnL = L.affinity_ok === false ? ` <span style="color:var(--accent)">⚠ affinity 未生效</span>` : '';
+      const affinityWarnU = U.affinity_ok === false ? ` <span style="color:var(--accent)">⚠ affinity 未生效</span>` : '';
       ins.innerHTML =
-        `● NUMA ${L.total_numa_nodes} nodes | ${L.workers} 執行緒 × ${L.array_mb} MB 連續讀取 | 記憶體分配在 Node${L.node_a}，分別由 Node${L.node_a} / Node${L.node_b} CPU 存取<br>`+
-        `● CPU Limited  — 本地 ${L.local_ms} ms（${L.bandwidth_local_gbps} GB/s）→ 跨 node ${L.remote_ms} ms（${L.bandwidth_remote_gbps} GB/s），跨 node 慢 ${L.slowdown}x<br>`+
-        `● CPU Unlimited — 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）→ 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s），跨 node 慢 ${U.slowdown}x<br>`+
-        `● 解法：kubelet 設定 cpuManagerPolicy: static + topologyManagerPolicy: single-numa-node，Pod 的 CPU 與記憶體將綁定在同一 NUMA node。`;
+        `● NUMA ${L.total_numa_nodes} nodes | 各 <strong>1 執行緒</strong> × ${L.array_mb} MB | 記憶體分配在 Node${L.node_a}，分別由 Node${L.node_a} / Node${L.node_b} CPU 存取<br>`+
+        `● CPU Limited${affinityWarnL} — 本地 ${L.local_ms} ms（${L.bandwidth_local_gbps} GB/s）→ 跨 node ${L.remote_ms} ms（${L.bandwidth_remote_gbps} GB/s）${lCrossNote}<br>`+
+        `● CPU Unlimited${affinityWarnU} — 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）→ 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s）${uCrossNote}<br>`+
+        `● 解法：kubelet 設定 <code>cpuManagerPolicy: static</code> + <code>topologyManagerPolicy: single-numa-node</code>，Pod 的 CPU 與記憶體將綁定在同一 NUMA node。`;
     } else {
       ins.innerHTML =
-        `● container 內 CPU 只涵蓋單一 NUMA node — 無法展示跨 node 存取差異<br>`+
-        `● 已改為記憶體頻寬測試：讀取 ${L.array_mb||128} MB，可用 CPU：[${(L.allowed_cpus||[]).join(',')||'—'}]<br>`+
+        `● container 內 CPU 只涵蓋單一 NUMA node — 無法展示跨 node 存取差異（兩側均為此情況）<br>`+
+        `● 已改為單執行緒記憶體頻寬測試：讀取 ${L.array_mb||128} MB，可用 CPU：[${(L.allowed_cpus||[]).join(',')||'—'}]<br>`+
         `● 若要展示 NUMA 效能差異：設定 requests.cpu = limits.cpu（整數）並啟用 K8s CPU Manager (static) + Topology Manager (single-numa-node)`;
     }
     document.getElementById('numaStatus').textContent = '完成';
