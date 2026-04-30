@@ -508,10 +508,8 @@ function renderNumaCompare(L, U) {
   if (!L || !U || L.error || U.error || L.mode === 'error' || U.mode === 'error') {
     div.style.display = 'none'; return;
   }
-  const lLabel = (L.allowed_cpus||[]).length > 0 ? `cpuset: ${L.allowed_cpus.join(' ')}` : 'CPU Limited';
-  const uLabel = (U.allowed_cpus||[]).length > 0 ? `cpuset: ${U.allowed_cpus.join(' ')}` : 'CPU Unlimited';
-  document.getElementById('nc-lim-hd').textContent = lLabel;
-  document.getElementById('nc-unlim-hd').textContent = uLabel;
+  document.getElementById('nc-lim-hd').textContent = L.pod_name || 'CPU Limited';
+  document.getElementById('nc-unlim-hd').textContent = U.pod_name || 'CPU Unlimited';
 
   const lBwLocal  = L.available ? L.bandwidth_local_gbps  : L.bandwidth_single_gbps;
   const uBwLocal  = U.available ? U.bandwidth_local_gbps  : U.bandwidth_single_gbps;
@@ -579,50 +577,54 @@ async function runNumaBench() {
       const uSlowdownOk = U.slowdown > 1.05;
       const crossFasterNote = U.bandwidth_remote_gbps > U.bandwidth_local_gbps
         ? `<br>⚠ <span style="color:var(--accent)">跨 node 頻寬（${U.bandwidth_remote_gbps} GB/s）反而比本地（${U.bandwidth_local_gbps} GB/s）快 — `+
-          `VM 環境常見現象：容器缺少 SYS_NICE 權限導致 sched_setaffinity() 靜默失效，執行緒並未真正綁到指定 CPU，`+
-          `local/remote 標籤測到的是 OS 隨機排程結果而非真實 NUMA 拓撲。</span>` : '';
+          (U.memory_pinned
+            ? `libnuma mbind 已生效（記憶體確實分配在不同節點），跨 node 仍快最可能是此 VM 的 NUMA 拓撲為虛擬拓撲，兩個 node 實際共用同一物理 DRAM 控制器。`
+            : `libnuma 不可用，依賴 sched_setaffinity() 做 first-touch；容器缺少 SYS_NICE 可能導致 thread 未真正綁到指定 CPU，local/remote 標籤可能為 OS 隨機排程結果。`)+
+          `</span>` : '';
       const affinityNote = U.affinity_ok === false
-        ? `<br>⚠ <span style="color:var(--accent)">affinity 診斷：local/remote 執行緒跑在重疊的核心上，頻寬差異不可信。</span>` : '';
+        ? `<br>⚠ <span style="color:var(--accent)">affinity 診斷：執行緒未如預期固定在 Node${U.node_a} CPU；libnuma 仍確保記憶體在正確節點，頻寬結果仍有效但可能未完全反映本地 CPU 優勢。</span>` : '';
       const touchNote = U.first_touch_in_node_a === false
-        ? `<br>⚠ <span style="color:var(--lim)">first-touch 未落在 Node${U.node_a}，記憶體頁面可能在錯誤節點，local/remote 標籤可能互換。</span>` : '';
+        ? `<br>⚠ <span style="color:var(--lim)">libnuma 不可用，記憶體基於 first-touch 分配；若容器缺少 SYS_NICE 導致 sched_setaffinity() 失效，local/remote 標籤可能不準確。</span>` : '';
       const latLine = U.local_lat_ns != null
         ? `<br>● 隨機存取延遲（pointer-chase ${U.lat_array_mb||256} MB，破壞 prefetcher）— `+
-          `Unlimited 本地：<strong>${U.local_lat_ns} ns</strong>`+
+          `${U.pod_name||'Unlimited'} 本地：<strong>${U.local_lat_ns} ns</strong>`+
           (U.remote_lat_ns != null ? `，跨 node：<strong>${U.remote_lat_ns} ns</strong>（<strong style="color:var(--lim)">${U.lat_ratio}x</strong>）` : '')+
-          (L.local_lat_ns != null ? `；Limited 本地：<strong>${L.local_lat_ns} ns</strong>` : '')
+          (L.local_lat_ns != null ? `；${L.pod_name||'Limited'} 本地：<strong>${L.local_lat_ns} ns</strong>` : '')
         : '';
       ins.innerHTML =
-        `● CPU Limited（cpuset [${lCpus}]，單一 NUMA node，<strong>1 執行緒</strong>）→ 本地讀取 ${L.array_mb||numaSizeMb} MB：${lMs} ms，頻寬 ${lBw} GB/s<br>`+
-        `● CPU Unlimited（無 cpuset，跨 Node${U.node_a}+Node${U.node_b}，各 <strong>1 執行緒</strong>）→ 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）vs 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s）`+
+        `● ${L.pod_name||'CPU Limited'}（cpuset [${lCpus}]，單一 NUMA node，<strong>1 執行緒</strong>）→ 本地讀取 ${L.array_mb||numaSizeMb} MB：${lMs} ms，頻寬 ${lBw} GB/s<br>`+
+        `● ${U.pod_name||'CPU Unlimited'}（無 cpuset，跨 Node${U.node_a}+Node${U.node_b}，各 <strong>1 執行緒</strong>）→ 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）vs 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s）`+
         (uSlowdownOk
           ? `，<strong style="color:var(--lim)">跨 node 慢 ${U.slowdown}x</strong>`
           : `，差異不顯著（slowdown=${U.slowdown}x）`)+
         crossFasterNote + affinityNote + touchNote + latLine +
         `<br>● 兩側均使用 <strong>1 執行緒</strong>（公平對比，已排除執行緒數差異）。`+
         (uSlowdownOk
-          ? ` NUMA 綁定使 CPU Limited Pod 所有記憶體存取集中在本地 DRAM，無跨 QPI 延遲。`
+          ? ` NUMA 綁定使 ${L.pod_name||'CPU Limited'} 所有記憶體存取集中在本地 DRAM，無跨 QPI 延遲。`
           : ` 若 slowdown ≈ 1.0，表示此 VM 的 NUMA 拓撲為虛擬拓撲，不代表真實 QPI 延遲差異。`);
     } else if (L.available && U.available) {
       const lCrossNote = L.bandwidth_remote_gbps > L.bandwidth_local_gbps
-        ? ` <span style="color:var(--accent)">⚠ 跨 node 反而快，affinity 可能未生效</span>` : `，跨 node 慢 ${L.slowdown}x`;
+        ? ` <span style="color:var(--accent)">⚠ 跨 node 反而快 — ${L.memory_pinned ? 'libnuma 已生效，可能是虛擬 NUMA 拓撲' : 'sched_setaffinity 可能未生效'}</span>`
+        : `，跨 node 慢 ${L.slowdown}x`;
       const uCrossNote = U.bandwidth_remote_gbps > U.bandwidth_local_gbps
-        ? ` <span style="color:var(--accent)">⚠ 跨 node 反而快，affinity 可能未生效</span>` : `，跨 node 慢 ${U.slowdown}x`;
-      const affinityWarnL = L.affinity_ok === false ? ` <span style="color:var(--accent)">⚠ affinity 未生效</span>` : '';
-      const affinityWarnU = U.affinity_ok === false ? ` <span style="color:var(--accent)">⚠ affinity 未生效</span>` : '';
+        ? ` <span style="color:var(--accent)">⚠ 跨 node 反而快 — ${U.memory_pinned ? 'libnuma 已生效，可能是虛擬 NUMA 拓撲' : 'sched_setaffinity 可能未生效'}</span>`
+        : `，跨 node 慢 ${U.slowdown}x`;
+      const affinityWarnL = L.affinity_ok === false ? ` <span style="color:var(--accent)">⚠ 執行緒未在 Node${L.node_a} CPU 執行</span>` : '';
+      const affinityWarnU = U.affinity_ok === false ? ` <span style="color:var(--accent)">⚠ 執行緒未在 Node${U.node_a} CPU 執行</span>` : '';
       const latLine = (L.local_lat_ns != null || U.local_lat_ns != null)
         ? `<br>● 延遲（pointer-chase ${L.lat_array_mb||256} MB）— `+
-          `Limited：本地 ${L.local_lat_ns!=null?L.local_lat_ns:'—'} ns / 跨 node ${L.remote_lat_ns!=null?L.remote_lat_ns:'—'} ns（${L.lat_ratio!=null?L.lat_ratio+'x':'—'}）`+
-          ` | Unlimited：本地 ${U.local_lat_ns!=null?U.local_lat_ns:'—'} ns / 跨 node ${U.remote_lat_ns!=null?U.remote_lat_ns:'—'} ns（${U.lat_ratio!=null?U.lat_ratio+'x':'—'}）`
+          `${L.pod_name||'Limited'}：本地 ${L.local_lat_ns!=null?L.local_lat_ns:'—'} ns / 跨 node ${L.remote_lat_ns!=null?L.remote_lat_ns:'—'} ns（${L.lat_ratio!=null?L.lat_ratio+'x':'—'}）`+
+          ` | ${U.pod_name||'Unlimited'}：本地 ${U.local_lat_ns!=null?U.local_lat_ns:'—'} ns / 跨 node ${U.remote_lat_ns!=null?U.remote_lat_ns:'—'} ns（${U.lat_ratio!=null?U.lat_ratio+'x':'—'}）`
         : '';
       ins.innerHTML =
-        `● NUMA ${L.total_numa_nodes} nodes | 各 <strong>1 執行緒</strong> × ${L.array_mb} MB | 記憶體分配在 Node${L.node_a}，分別由 Node${L.node_a} / Node${L.node_b} CPU 存取<br>`+
-        `● CPU Limited${affinityWarnL} — 本地 ${L.local_ms} ms（${L.bandwidth_local_gbps} GB/s）→ 跨 node ${L.remote_ms} ms（${L.bandwidth_remote_gbps} GB/s）${lCrossNote}<br>`+
-        `● CPU Unlimited${affinityWarnU} — 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）→ 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s）${uCrossNote}`+
+        `● NUMA ${L.total_numa_nodes} nodes | 各 <strong>1 執行緒</strong> × ${L.array_mb} MB | arr_local（Node${L.node_a} DRAM）、arr_remote（Node${L.node_b} DRAM），CPU 固定在 Node${L.node_a}<br>`+
+        `● ${L.pod_name||'CPU Limited'}${affinityWarnL} — 本地 ${L.local_ms} ms（${L.bandwidth_local_gbps} GB/s）→ 跨 node ${L.remote_ms} ms（${L.bandwidth_remote_gbps} GB/s）${lCrossNote}<br>`+
+        `● ${U.pod_name||'CPU Unlimited'}${affinityWarnU} — 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）→ 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s）${uCrossNote}`+
         latLine +
         `<br>● 解法：kubelet 設定 <code>cpuManagerPolicy: static</code> + <code>topologyManagerPolicy: single-numa-node</code>，Pod 的 CPU 與記憶體將綁定在同一 NUMA node。`;
     } else {
       const latLine = (L.local_lat_ns != null || U.local_lat_ns != null)
-        ? `<br>● 延遲（本地 pointer-chase）— Limited：${L.local_lat_ns!=null?L.local_lat_ns:'—'} ns | Unlimited：${U.local_lat_ns!=null?U.local_lat_ns:'—'} ns`
+        ? `<br>● 延遲（本地 pointer-chase）— ${L.pod_name||'Limited'}：${L.local_lat_ns!=null?L.local_lat_ns:'—'} ns | ${U.pod_name||'Unlimited'}：${U.local_lat_ns!=null?U.local_lat_ns:'—'} ns`
         : '';
       ins.innerHTML =
         `● container 內 CPU 只涵蓋單一 NUMA node — 無法展示跨 node 存取差異（兩側均為此情況）<br>`+

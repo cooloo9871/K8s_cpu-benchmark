@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, jsonify, request
 from datetime import datetime
 from pathlib import Path
+import ctypes
 
 app = Flask(__name__)
 
@@ -409,6 +410,44 @@ def _lat_worker(args):
     # DRAM contribution ≈ large − small (both include identical Python overhead)
     return round(max(1.0, large_ns - small_ns), 1), d1 ^ d2
 
+def _load_libnuma():
+    """Load libnuma.so.1 via ctypes. Returns the library handle or None."""
+    try:
+        lib = ctypes.CDLL('libnuma.so.1')
+        lib.numa_available.restype  = ctypes.c_int
+        lib.numa_available.argtypes = []
+        if lib.numa_available() < 0:
+            return None
+        lib.numa_alloc_onnode.restype  = ctypes.c_void_p
+        lib.numa_alloc_onnode.argtypes = [ctypes.c_size_t, ctypes.c_int]
+        lib.numa_free.restype  = None
+        lib.numa_free.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        return lib
+    except Exception:
+        return None
+
+_libnuma = _load_libnuma()
+
+def _alloc_on_node(n_elem, node_id, dtype=np.float64):
+    """Allocate n_elem elements on NUMA node_id via libnuma mbind.
+    Memory policy is set regardless of which CPU triggers the page fault —
+    eliminates first-touch / sched_setaffinity unreliability.
+    Returns (arr, free_fn). Call free_fn() after the array is no longer needed."""
+    itemsize = np.dtype(dtype).itemsize
+    size     = n_elem * itemsize
+    if _libnuma is not None:
+        ptr = _libnuma.numa_alloc_onnode(size, node_id)
+        if ptr:
+            # Wrap libnuma memory as numpy array WITHOUT copying.
+            # Must not call .copy() — doing so would move the data to Python-heap
+            # memory, losing the NUMA binding entirely.
+            arr = np.frombuffer((ctypes.c_byte * size).from_address(ptr), dtype=dtype)
+            def free_fn(p=ptr, s=size):
+                _libnuma.numa_free(p, s)
+            return arr, free_fn
+    arr = np.empty(n_elem, dtype=dtype)
+    return arr, lambda: None
+
 @app.route("/bench/numa")
 def bench_numa():
     try:
@@ -467,128 +506,128 @@ def _bench_numa_impl(array_mb=1024):
         cpus_b   = node_cpus[node_ids[1]]
         workers  = 1  # fixed 1 thread per side: eliminates thread-count variable from bandwidth comparison
 
-        # Use np.empty so no pages are faulted yet (demand-paged).
-        # np.ones() would first-touch in the main thread, whose sched_setaffinity
-        # often fails silently in containers (no SYS_NICE) → pages land on the
-        # wrong node → "remote" reads become local and appear faster.
-        arr      = np.empty(n, dtype=np.float64)
-        evict_n  = (64 * 1024 * 1024) // 8
+        # libnuma guarantees memory lands on the target node regardless of
+        # which CPU triggers the page fault — eliminates first-touch unreliability.
+        lat_mb = 64
+        lat_n  = (lat_mb * 1024 * 1024) // 8
+
+        arr_local,        free_local      = _alloc_on_node(n,     node_ids[0])
+        arr_remote,       free_remote     = _alloc_on_node(n,     node_ids[1])
+        lat_chain_local,  free_lat_local  = _alloc_on_node(lat_n, node_ids[0], dtype=np.int64)
+        lat_chain_remote, free_lat_remote = _alloc_on_node(lat_n, node_ids[1], dtype=np.int64)
+        evict_n   = (64 * 1024 * 1024) // 8
         evict_buf = np.empty(evict_n, dtype=np.float64)
-        chunks   = np.array_split(arr, workers)
+        chunks_local = chunks_remote = None
+        try:
+            # Page-fault all arrays to place pages on their assigned NUMA nodes.
+            # With libnuma mbind policy this happens regardless of current CPU.
+            arr_local[:]  = 1.0
+            arr_remote[:] = 1.0
+            evict_buf[:]  = 1.0
 
-        # Pre-create executor once; exclude thread-pool setup from timing.
-        PASSES = 7  # odd; median index = 3
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            # First-touch arr and evict_buf from a worker thread pinned to Node A.
-            # Worker threads reliably set their own affinity; the main thread cannot.
-            def _init_on_node_a(_):
-                try:
-                    os.sched_setaffinity(0, {cpus_a[0]})
-                except Exception:
-                    pass
-                arr[:]       = 1.0   # page-fault: places all arr pages on Node A DRAM
-                evict_buf[:] = 1.0   # page-fault evict_buf on Node A as well
-                return _get_thread_cpu()
+            # Initialize latency chains as random permutations in-place.
+            # Pages stay on the assigned node because the buffer is already faulted.
+            lat_chain_local[:]  = np.arange(lat_n, dtype=np.int64)
+            np.random.default_rng().shuffle(lat_chain_local)
+            lat_chain_remote[:] = np.arange(lat_n, dtype=np.int64)
+            np.random.default_rng().shuffle(lat_chain_remote)
 
-            touch_cpu             = ex.submit(_init_on_node_a, None).result()
-            first_touch_in_node_a = (touch_cpu in set(cpus_a))
+            chunks_local  = np.array_split(arr_local,  workers)
+            chunks_remote = np.array_split(arr_remote, workers)
 
-            # Symmetric warm-up: evict arr from L3, then one warm pass per node.
-            float(np.sum(evict_buf))
-            run_pass(ex, chunks, cpus_a)
-            float(np.sum(evict_buf))
-            run_pass(ex, chunks, cpus_b)
+            PASSES = 7
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                # Warm-up: both arrays read from node_a CPUs
+                float(np.sum(evict_buf))
+                run_pass(ex, chunks_local,  cpus_a)
+                float(np.sum(evict_buf))
+                run_pass(ex, chunks_remote, cpus_a)
 
-            # Interleaved timed passes: stream evict_buf before every measurement
-            # so arr must be fetched from DRAM each time (not L3).
-            local_times, remote_times = [], []
-            local_cpus_seen, remote_cpus_seen = set(), set()
-            local_thr_log, remote_thr_log = [], []
-            for _ in range(PASSES):
-                float(np.sum(evict_buf))   # flush arr from Node A L3
-                t, cpus, thr = run_pass(ex, chunks, cpus_a)
-                local_times.append(t)
-                local_cpus_seen.update(cpus)
-                local_thr_log.append(thr)
+                local_times, remote_times = [], []
+                local_cpus_seen, remote_cpus_seen = set(), set()
+                local_thr_log, remote_thr_log = [], []
+                for _ in range(PASSES):
+                    # Local: CPU on node_a reads arr_local (node_a memory)
+                    float(np.sum(evict_buf))
+                    t, cpus, thr = run_pass(ex, chunks_local, cpus_a)
+                    local_times.append(t)
+                    local_cpus_seen.update(cpus)
+                    local_thr_log.append(thr)
 
-                float(np.sum(evict_buf))   # flush before remote
-                t, cpus, thr = run_pass(ex, chunks, cpus_b)
-                remote_times.append(t)
-                remote_cpus_seen.update(cpus)
-                remote_thr_log.append(thr)
+                    # Remote: CPU still on node_a, reads arr_remote (node_b memory)
+                    float(np.sum(evict_buf))
+                    t, cpus, thr = run_pass(ex, chunks_remote, cpus_a)
+                    remote_times.append(t)
+                    remote_cpus_seen.update(cpus)
+                    remote_thr_log.append(thr)
 
-            # Median discards outlier passes caused by OS scheduling noise.
-            local_order  = sorted(range(PASSES), key=lambda i: local_times[i])
-            remote_order = sorted(range(PASSES), key=lambda i: remote_times[i])
-            local_ms  = round(local_times[local_order[PASSES // 2]], 2)
-            remote_ms = round(remote_times[remote_order[PASSES // 2]], 2)
-            local_thread_cpus  = local_thr_log[local_order[PASSES // 2]]
-            remote_thread_cpus = remote_thr_log[remote_order[PASSES // 2]]
-            actual_local_cpus  = sorted(local_cpus_seen)
-            actual_remote_cpus = sorted(remote_cpus_seen)
+                local_order  = sorted(range(PASSES), key=lambda i: local_times[i])
+                remote_order = sorted(range(PASSES), key=lambda i: remote_times[i])
+                local_ms  = round(local_times[local_order[PASSES // 2]], 2)
+                remote_ms = round(remote_times[remote_order[PASSES // 2]], 2)
+                local_thread_cpus  = local_thr_log[local_order[PASSES // 2]]
+                remote_thread_cpus = remote_thr_log[remote_order[PASSES // 2]]
+                actual_local_cpus  = sorted(local_cpus_seen)
+                actual_remote_cpus = sorted(remote_cpus_seen)
 
-            # ── Pointer-chase latency test ────────────────────────────────────
-            # 64 MB chain beats any common L3 (≤ 64 MB on most servers).
-            # Allocate in-place inside the thread → single allocation, no copy.
-            lat_mb = 64
-            lat_n  = (lat_mb * 1024 * 1024) // 8
+                # Latency: both chains measured from node_a CPU — only memory location differs
+                local_lat_ns,  _ = ex.submit(_lat_worker, (lat_chain_local,  {cpus_a[0]})).result()
+                remote_lat_ns, _ = ex.submit(_lat_worker, (lat_chain_remote, {cpus_a[0]})).result()
+                lat_ratio = round(remote_lat_ns / local_lat_ns, 2) if local_lat_ns > 0 else 0
 
-            def _init_lat_chain(_):
-                try:
-                    os.sched_setaffinity(0, {cpus_a[0]})
-                except Exception:
-                    pass
-                chain = np.arange(lat_n, dtype=np.int64)
-                np.random.default_rng().shuffle(chain)
-                return chain
+            # affinity_ok: all threads ran on node_a CPUs (both passes use cpus_a)
+            cpus_a_set  = set(cpus_a)
+            affinity_ok = (
+                all(c in cpus_a_set for c in actual_local_cpus) and
+                all(c in cpus_a_set for c in actual_remote_cpus)
+            )
+            memory_pinned = _libnuma is not None
 
-            lat_chain = ex.submit(_init_lat_chain, None).result()
+            bw_local  = round(array_mb / 1024 / (local_ms  / 1000), 2) if local_ms  > 0 else 0
+            bw_remote = round(array_mb / 1024 / (remote_ms / 1000), 2) if remote_ms > 0 else 0
+            slowdown  = round(remote_ms / local_ms, 2) if local_ms > 0 else 0
 
-            local_lat_ns,  _ = ex.submit(_lat_worker, (lat_chain, {cpus_a[0]})).result()
-            remote_lat_ns, _ = ex.submit(_lat_worker, (lat_chain, {cpus_b[0]})).result()
-            lat_ratio = round(remote_lat_ns / local_lat_ns, 2) if local_lat_ns > 0 else 0
-
-        # affinity_ok=False: worker threads ran on overlapping cores → unreliable.
-        # first_touch_in_node_a=False: arr pages landed on the wrong node →
-        #   "local" is actually cross-QPI and "remote" is actually local → labels swapped.
-        affinity_ok           = not bool(set(actual_local_cpus) & set(actual_remote_cpus))
-
-        bw_local  = round(array_mb / 1024 / (local_ms  / 1000), 2) if local_ms  > 0 else 0
-        bw_remote = round(array_mb / 1024 / (remote_ms / 1000), 2) if remote_ms > 0 else 0
-        slowdown  = round(remote_ms / local_ms, 2) if local_ms > 0 else 0
-
-        return jsonify({
-            "available": True,
-            "mode": "cross_numa",
-            "array_mb": array_mb,
-            "workers": workers,
-            "total_numa_nodes": len(numa_map),
-            "node_a": node_ids[0],
-            "node_b": node_ids[1],
-            "node_a_cpus": cpus_a,
-            "node_b_cpus": cpus_b,
-            "actual_local_cpus": actual_local_cpus,
-            "actual_remote_cpus": actual_remote_cpus,
-            "local_thread_cpus": local_thread_cpus,
-            "remote_thread_cpus": remote_thread_cpus,
-            "affinity_ok": affinity_ok,
-            "first_touch_in_node_a": first_touch_in_node_a,
-            "local_ms": local_ms,
-            "remote_ms": remote_ms,
-            "slowdown": slowdown,
-            "bandwidth_local_gbps": bw_local,
-            "bandwidth_remote_gbps": bw_remote,
-            "local_lat_ns": local_lat_ns,
-            "remote_lat_ns": remote_lat_ns,
-            "lat_ratio": lat_ratio,
-            "lat_array_mb": lat_mb,
-            "allowed_cpus": allowed,
-            "cpuset_active": cpuset_active,
-            "pod_name": POD_NAME,
-            "has_cpu_limit": HAS_LIMIT,
-            "cpu_limit": get_cpu_limit_str(),
-            "timestamp": datetime.utcnow().isoformat()
-        })
+            response = jsonify({
+                "available": True,
+                "mode": "cross_numa",
+                "array_mb": array_mb,
+                "workers": workers,
+                "total_numa_nodes": len(numa_map),
+                "node_a": node_ids[0],
+                "node_b": node_ids[1],
+                "node_a_cpus": cpus_a,
+                "node_b_cpus": cpus_b,
+                "actual_local_cpus": actual_local_cpus,
+                "actual_remote_cpus": actual_remote_cpus,
+                "local_thread_cpus": local_thread_cpus,
+                "remote_thread_cpus": remote_thread_cpus,
+                "affinity_ok": affinity_ok,
+                "first_touch_in_node_a": memory_pinned,
+                "libnuma_available": _libnuma is not None,
+                "memory_pinned": memory_pinned,
+                "local_ms": local_ms,
+                "remote_ms": remote_ms,
+                "slowdown": slowdown,
+                "bandwidth_local_gbps": bw_local,
+                "bandwidth_remote_gbps": bw_remote,
+                "local_lat_ns": local_lat_ns,
+                "remote_lat_ns": remote_lat_ns,
+                "lat_ratio": lat_ratio,
+                "lat_array_mb": lat_mb,
+                "allowed_cpus": allowed,
+                "cpuset_active": cpuset_active,
+                "pod_name": POD_NAME,
+                "has_cpu_limit": HAS_LIMIT,
+                "cpu_limit": get_cpu_limit_str(),
+                "timestamp": datetime.utcnow().isoformat()
+            })
+        finally:
+            chunks_local = chunks_remote = None   # drop sub-array refs before freeing
+            del arr_local, arr_remote
+            del lat_chain_local, lat_chain_remote
+            free_local();     free_remote()
+            free_lat_local(); free_lat_remote()
+        return response
 
     # ── Single-NUMA fallback: bandwidth scaling (1 thread vs N threads) ───────
     else:
