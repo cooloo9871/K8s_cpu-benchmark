@@ -448,6 +448,20 @@ def _alloc_on_node(n_elem, node_id, dtype=np.float64):
     arr = np.empty(n_elem, dtype=dtype)
     return arr, lambda: None
 
+def _is_cpuset_pinned(allowed, numa_map):
+    """Return True when the container CPUs are restricted AND all land on one NUMA node.
+    True  → worker-limited style: use each node's own CPUs for local/remote passes.
+    False → worker-unlimited style: fix to a single CPU so only memory location varies."""
+    total_cpus = sum(len(v) for v in numa_map.values())
+    if len(allowed) >= total_cpus:
+        return False
+    nodes_used = set()
+    allowed_set = set(allowed)
+    for nid, cpus in numa_map.items():
+        if any(c in allowed_set for c in cpus):
+            nodes_used.add(nid)
+    return len(nodes_used) == 1
+
 @app.route("/bench/numa")
 def bench_numa():
     try:
@@ -501,10 +515,20 @@ def _bench_numa_impl(array_mb=1024):
 
     # ── Cross-NUMA mode ───────────────────────────────────────────────────────
     if len(node_cpus) >= 2:
-        node_ids = sorted(node_cpus.keys())
-        cpus_a   = node_cpus[node_ids[0]]
-        cpus_b   = node_cpus[node_ids[1]]
-        workers  = 1  # fixed 1 thread per side: eliminates thread-count variable from bandwidth comparison
+        node_ids  = sorted(node_cpus.keys())
+        is_pinned = _is_cpuset_pinned(allowed, numa_map)
+        workers   = 1  # fixed 1 thread per side: eliminates thread-count variable from bandwidth comparison
+
+        if is_pinned:
+            # cpuset restricted to one node — use each node's CPUs for their respective pass
+            cpus_a = node_cpus[node_ids[0]]
+            cpus_b = node_cpus[node_ids[1]]
+        else:
+            # cpuset spans multiple nodes — pin both passes to a single CPU on node 0
+            # so the only variable is memory location, not CPU placement
+            fixed_cpu = node_cpus[node_ids[0]][0]
+            cpus_a = [fixed_cpu]
+            cpus_b = [fixed_cpu]
 
         # libnuma guarantees memory lands on the target node regardless of
         # which CPU triggers the page fault — eliminates first-touch unreliability.
@@ -605,6 +629,8 @@ def _bench_numa_impl(array_mb=1024):
                 "first_touch_in_node_a": memory_pinned,
                 "libnuma_available": _libnuma is not None,
                 "memory_pinned": memory_pinned,
+                "cpuset_pinned": is_pinned,
+                "test_strategy": "pinned_cpu" if is_pinned else "fixed_node0_cpu",
                 "local_ms": local_ms,
                 "remote_ms": remote_ms,
                 "slowdown": slowdown,

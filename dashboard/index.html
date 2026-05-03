@@ -214,13 +214,6 @@
 
   <section>
     <div class="sec-title">NUMA 記憶體效能測試 — 連續讀取（頻寬）+ 隨機存取（延遲）</div>
-    <div class="run-row" style="margin-bottom:12px;flex-wrap:wrap">
-      <span style="font-family:var(--mono);font-size:17px;color:var(--muted)">測試陣列大小：</span>
-      <button class="numa-size-btn" id="nsz-128"  onclick="setNumaSize(128)">128 MB</button>
-      <button class="numa-size-btn" id="nsz-512"  onclick="setNumaSize(512)">512 MB</button>
-      <button class="numa-size-btn numa-size-active" id="nsz-1024" onclick="setNumaSize(1024)">1024 MB</button>
-      <button class="numa-size-btn" id="nsz-2048" onclick="setNumaSize(2048)">2048 MB</button>
-    </div>
     <div class="run-row" style="margin-bottom:20px">
       <button class="run-btn" id="numaBtn" onclick="runNumaBench()">▶ 執行 NUMA 壓測</button>
       <span class="run-count" id="numaStatus">尚未執行</span>
@@ -290,28 +283,6 @@
 
 <script>
 let runN=0,histL=[],histU=[],histLbls=[];
-let numaSizeMb = 1024;
-function setNumaSize(mb) {
-  numaSizeMb = mb;
-  [128, 512, 1024, 2048].forEach(s => {
-    const btn = document.getElementById('nsz-'+s);
-    if (btn) btn.className = 'numa-size-btn' + (s === mb ? ' numa-size-active' : '');
-  });
-}
-
-// Parses Linux cpuset format "0-3,8-11" → [0,1,2,3,8,9,10,11]
-function parseCpuList(s) {
-  if (!s) return [];
-  const cpus = [];
-  for (const part of String(s).split(',')) {
-    const t = part.trim();
-    if (!t) continue;
-    const m = t.match(/^(\d+)-(\d+)$/);
-    if (m) { for (let i = +m[1]; i <= +m[2]; i++) cpus.push(i); }
-    else { cpus.push(parseInt(t, 10)); }
-  }
-  return cpus;
-}
 
 // Returns badge label for a worker response (non-NUMA sections only):
 //   cpu_limit_cores set → "limits.cpu: N"  (numeric, from cgroup path discovery)
@@ -515,7 +486,6 @@ function renderNumaCompare(L, U) {
   const uBwLocal  = U.available ? U.bandwidth_local_gbps  : U.bandwidth_single_gbps;
   const lBwRemote = L.available ? L.bandwidth_remote_gbps : null;
   const uBwRemote = U.available ? U.bandwidth_remote_gbps : null;
-  const fmt = v => v != null ? v : '—';
   const fmtGBs = v => v != null ? v+' GB/s' : '—';
   const fmtNs  = v => v != null ? v+' ns'   : '—';
   const fmtX   = v => v != null ? v+'x'     : '—';
@@ -541,10 +511,10 @@ function renderNumaCompare(L, U) {
 async function runNumaBench() {
   document.getElementById('numaBtn').disabled = true;
   document.getElementById('numaStatus').textContent = '執行中...';
-  document.querySelector('.spin-sub').textContent = `循序執行 NUMA 測試（${numaSizeMb} MB）— 先 Limited，再 Unlimited`;
+  document.querySelector('.spin-sub').textContent = '循序執行 NUMA 測試（2048 MB）';
   document.getElementById('overlay').classList.add('on');
   try {
-    const res = await fetch('/api/numa_bench?size_mb=' + numaSizeMb);
+    const res = await fetch('/api/numa_bench?size_mb=2048');
     const d = await res.json();
     const L = d.limited, U = d.unlimited;
     if (!L || !U) {
@@ -592,7 +562,7 @@ async function runNumaBench() {
           (L.local_lat_ns != null ? `；${L.pod_name||'Limited'} 本地：<strong>${L.local_lat_ns} ns</strong>` : '')
         : '';
       ins.innerHTML =
-        `● ${L.pod_name||'CPU Limited'}（cpuset [${lCpus}]，單一 NUMA node，<strong>1 執行緒</strong>）→ 本地讀取 ${L.array_mb||numaSizeMb} MB：${lMs} ms，頻寬 ${lBw} GB/s<br>`+
+        `● ${L.pod_name||'CPU Limited'}（cpuset [${lCpus}]，單一 NUMA node，<strong>1 執行緒</strong>）→ 本地讀取 ${L.array_mb||2048} MB：${lMs} ms，頻寬 ${lBw} GB/s<br>`+
         `● ${U.pod_name||'CPU Unlimited'}（無 cpuset，跨 Node${U.node_a}+Node${U.node_b}，各 <strong>1 執行緒</strong>）→ 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）vs 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s）`+
         (uSlowdownOk
           ? `，<strong style="color:var(--lim)">跨 node 慢 ${U.slowdown}x</strong>`
@@ -628,12 +598,12 @@ async function runNumaBench() {
         : '';
       ins.innerHTML =
         `● container 內 CPU 只涵蓋單一 NUMA node — 無法展示跨 node 存取差異（兩側均為此情況）<br>`+
-        `● 頻寬測試：讀取 ${L.array_mb||numaSizeMb} MB，可用 CPU：[${(L.allowed_cpus||[]).join(',')||'—'}]`+
+        `● 頻寬測試：讀取 ${L.array_mb||2048} MB，可用 CPU：[${(L.allowed_cpus||[]).join(',')||'—'}]`+
         latLine +
         `<br>● 若要展示 NUMA 效能差異：設定 requests.cpu = limits.cpu（整數）並啟用 K8s CPU Manager (static) + Topology Manager (single-numa-node)`;
     }
     document.getElementById('numaStatus').textContent = '完成';
-    log(`NUMA 壓測完成（${numaSizeMb} MB）— 受限：本地 ${L.local_ms||L.single_ms||'—'}ms 延遲 ${L.local_lat_ns||'—'}ns | 無限制：本地 ${U.local_ms||U.single_ms||'—'}ms 延遲 ${U.local_lat_ns||'—'}ns`);
+    log(`NUMA 壓測完成（2048 MB）— 受限：本地 ${L.local_ms||L.single_ms||'—'}ms 延遲 ${L.local_lat_ns||'—'}ns | 無限制：本地 ${U.local_ms||U.single_ms||'—'}ms 延遲 ${U.local_lat_ns||'—'}ns`);
   } catch(e) {
     log('NUMA ERROR: ' + e.message);
     document.getElementById('numaStatus').textContent = '錯誤';

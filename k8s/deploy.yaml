@@ -44,13 +44,17 @@ spec:
                   fieldPath: metadata.name
             - name: HAS_CPU_LIMIT
               value: "true"
+          securityContext:
+            capabilities:
+              add:
+                - SYS_NICE
           resources:
             requests:
               cpu: "100m"
               memory: "512Mi"
             limits:
               cpu: "100m"      # <-- THE KEY CONSTRAINT: throttled to 0.1 core
-              memory: "3Gi"    # large enough for 2048 MB test array + latency chain
+              memory: "5Gi"    # 2x 2048 MB arrays + lat chains + evict_buf + overhead ≈ 4.4 GiB
           readinessProbe:
             httpGet:
               path: /health
@@ -112,6 +116,16 @@ spec:
                   fieldPath: metadata.name
             - name: HAS_CPU_LIMIT
               value: "false"
+          securityContext:
+            capabilities:
+              add:
+                - SYS_NICE
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "512Mi"
+            limits:
+              memory: "5Gi"    # 2x 2048 MB arrays + lat chains + evict_buf + overhead ≈ 4.4 GiB
           readinessProbe:
             httpGet:
               path: /health
