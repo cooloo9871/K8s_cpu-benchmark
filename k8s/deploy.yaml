@@ -104,12 +104,12 @@ spec:
         app: worker-unlimited
     spec:
       affinity:
-        podAffinity:
+        podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchLabels:
-                  app: worker-limited
-              topologyKey: kubernetes.io/hostname
+          - labelSelector:
+              matchLabels:
+                app: worker-limited
+            topologyKey: kubernetes.io/hostname
       containers:
         - name: worker-unlimited
           image: quay.io/cooloo9871/cpu-bench-worker:latest
