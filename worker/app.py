@@ -773,8 +773,8 @@ def stress_start():
 
 @app.route("/stress/stop", methods=["POST"])
 def stress_stop():
-    _stress_stop.set()
     with _stress_lock:
+        _stress_stop.set()
         _stress_state["running"] = False
     return jsonify({"status": "stopped", "pod_name": POD_NAME})
 

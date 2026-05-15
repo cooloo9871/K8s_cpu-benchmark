@@ -51,7 +51,7 @@ spec:
           resources:
             requests:
               cpu: "100m"
-              memory: "512Mi"
+              memory: "5Gi"
             limits:
               cpu: "100m"      # <-- THE KEY CONSTRAINT: throttled to 0.1 core
               memory: "5Gi"    # 2x 2048 MB arrays + lat chains + evict_buf + overhead ≈ 4.4 GiB
@@ -104,7 +104,7 @@ spec:
         app: worker-unlimited
     spec:
       affinity:
-        podAntiAffinity:
+        podAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
           - labelSelector:
               matchLabels:
@@ -198,7 +198,7 @@ spec:
               memory: "256Mi"
           readinessProbe:
             httpGet:
-              path: /
+              path: /api/health
               port: 3000
             initialDelaySeconds: 8
             periodSeconds: 10

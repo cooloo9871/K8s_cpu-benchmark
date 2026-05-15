@@ -260,13 +260,17 @@
     </div>
     <div style="padding:18px 22px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-family:var(--mono)">
       <div style="color:var(--accent);font-size:17px;margin-bottom:10px;letter-spacing:.05em">💡 壓測進行中可至 Prometheus 查詢以下 PromQL 觀察 throttle 比率：</div>
-      <div class="stress-promql">sum(rate(container_cpu_cfs_throttled_periods_total{
-  container=~"worker-.*", namespace="cpu-bench"
-}[1m])) by (pod)
+      <div class="stress-promql">sum(increase(container_cpu_cfs_throttled_periods_total{
+  container=~"worker-.*",
+  namespace="cpu-bench",
+  pod=~"worker-.*"
+}[1m])) by (container, pod, namespace)
 /
-sum(rate(container_cpu_cfs_periods_total{
-  container=~"worker-.*", namespace="cpu-bench"
-}[1m])) by (pod)</div>
+sum(increase(container_cpu_cfs_periods_total{
+  container=~"worker-.*",
+  namespace="cpu-bench",
+  pod=~"worker-.*"
+}[1m])) by (container, pod, namespace)</div>
     </div>
   </section>
 
@@ -335,7 +339,7 @@ sum(rate(container_cpu_cfs_periods_total{
   <div class="overlay-box">
     <div class="spinner"></div>
     <div class="spin-text">測試中...</div>
-    <div class="spin-sub">正在同時對兩個 Pod 執行 CPU 運算</div>
+    <div class="spin-sub">循序執行壓測（Unlimited → Limited）</div>
   </div>
 </div>
 
@@ -516,7 +520,7 @@ async function pollStressStatus() {
     const d   = await res.json();
     updateStressCard('stressLim',   d.limited);
     updateStressCard('stressUnlim', d.unlimited);
-    if (!d.limited?.running && !d.unlimited?.running) {
+    if (d.limited?.running === false && d.unlimited?.running === false) {
       clearInterval(stressPoller);
       stressPoller = null;
       resetStressUI();
@@ -739,7 +743,7 @@ async function runNumaBench() {
     log('NUMA ERROR: ' + e.message);
     document.getElementById('numaStatus').textContent = '錯誤';
   } finally {
-    document.querySelector('.spin-sub').textContent = '正在同時對兩個 Pod 執行 CPU 運算';
+    document.querySelector('.spin-sub').textContent = '循序執行壓測（Unlimited → Limited）';
     document.getElementById('overlay').classList.remove('on');
     document.getElementById('numaBtn').disabled = false;
   }
@@ -748,7 +752,7 @@ async function runNumaBench() {
 async function runBench(){
   document.getElementById('runBtn').disabled=true;
   document.getElementById('overlay').classList.add('on');
-  log('壓測開始 — 正在兩個 Pod 上執行費氏數列...');
+  log('壓測開始 — 循序執行費氏數列（Unlimited → Limited）...');
   try{
     const res=await fetch('/api/bench');
     const d=await res.json();

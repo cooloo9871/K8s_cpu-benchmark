@@ -45,27 +45,23 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(200, results)
         elif self.path == "/api/bench":
             results = {}
-            def run(url, key, label):
-                results[key] = fetch_bench(url, label)
-            t1 = threading.Thread(target=run, args=(LIMITED_URL,   "limited",   "CPU Limited"))
-            t2 = threading.Thread(target=run, args=(UNLIMITED_URL, "unlimited", "CPU Unlimited"))
-            t1.start(); t2.start()
-            t1.join();  t2.join()
+            # Sequential: Unlimited first (fast, clean), then Limited (throttled)
+            results["unlimited"] = fetch_bench(UNLIMITED_URL, "CPU Unlimited")
+            results["limited"]   = fetch_bench(LIMITED_URL,   "CPU Limited")
             self.send_json(200, results)
         elif self.path == "/api/thread_bench":
-            results = {}
-            def run_thread(url, key, label):
+            def fetch_thread(url, label):
                 try:
                     with urllib.request.urlopen(f"{url}/bench/threads", timeout=120) as r:
                         data = json.loads(r.read())
                         data["label"] = label
-                        results[key] = data
+                        return data
                 except Exception as e:
-                    results[key] = {"label": label, "error": str(e)}
-            t1 = threading.Thread(target=run_thread, args=(LIMITED_URL,   "limited",   "CPU Limited"))
-            t2 = threading.Thread(target=run_thread, args=(UNLIMITED_URL, "unlimited", "CPU Unlimited"))
-            t1.start(); t2.start()
-            t1.join();  t2.join()
+                    return {"label": label, "error": str(e)}
+            # Sequential: Unlimited first (fast, clean), then Limited (throttled)
+            results = {}
+            results["unlimited"] = fetch_thread(UNLIMITED_URL, "CPU Unlimited")
+            results["limited"]   = fetch_thread(LIMITED_URL,   "CPU Limited")
             self.send_json(200, results)
         elif self.path.startswith("/api/numa_bench"):
             from urllib.parse import urlparse, parse_qs
@@ -80,9 +76,9 @@ class Handler(SimpleHTTPRequestHandler):
                         results[key] = data
                 except Exception as e:
                     results[key] = {"label": label, "error": str(e)}
-            # Sequential execution: Limited first, then Unlimited — avoids bandwidth interference
-            run_numa(LIMITED_URL,   "limited",   "CPU Limited")
+            # Sequential: Unlimited first (clean baseline), then Limited (throttled)
             run_numa(UNLIMITED_URL, "unlimited", "CPU Unlimited")
+            run_numa(LIMITED_URL,   "limited",   "CPU Limited")
             self.send_json(200, results)
         elif self.path == "/api/stress/status":
             results = {}
