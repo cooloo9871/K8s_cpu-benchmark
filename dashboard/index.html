@@ -110,6 +110,14 @@
   .numa-size-btn:hover{border-color:var(--accent);color:var(--accent)}
   .numa-size-active{border-color:var(--accent)!important;color:var(--accent)!important;background:rgba(255,165,2,.1)!important}
 
+  /* STRESS TEST BUTTONS */
+  #stressStartBtn{border-color:var(--unlim);color:var(--unlim)}
+  #stressStartBtn::before{background:var(--unlim)}
+  #stressStopBtn{border-color:var(--lim);color:var(--lim)}
+  #stressStopBtn::before{background:var(--lim)}
+  #stressStopBtn:hover{color:#fff}
+  .stress-promql{color:var(--text);background:var(--bg);padding:14px 18px;border-radius:6px;border:1px solid var(--border);white-space:pre;font-size:15px;line-height:1.8;overflow-x:auto}
+
   /* OVERLAY */
   .overlay{position:fixed;inset:0;background:rgba(8,12,16,.88);display:none;align-items:center;justify-content:center;z-index:200;backdrop-filter:blur(6px)}
   .overlay.on{display:flex}
@@ -210,6 +218,56 @@
       </div>
     </div>
     <div id="threadInsight" style="display:none;padding:14px 18px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:18px;line-height:1.9;color:var(--muted)"></div>
+  </section>
+
+  <section>
+    <div class="sec-title">持續性 CPU 壓測 — 搭配 Prometheus 觀察 CFS throttle 比率</div>
+    <div style="display:flex;align-items:center;gap:32px;flex-wrap:wrap;margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-family:var(--mono);font-size:17px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase">時長</span>
+        <div id="stressDurBtns" style="display:flex;gap:8px">
+          <button class="numa-size-btn" onclick="setStressDur(30,this)">30s</button>
+          <button class="numa-size-btn numa-size-active" onclick="setStressDur(60,this)">60s</button>
+          <button class="numa-size-btn" onclick="setStressDur(120,this)">120s</button>
+          <button class="numa-size-btn" onclick="setStressDur(300,this)">300s</button>
+        </div>
+      </div>
+    </div>
+    <div class="run-row" style="margin-bottom:24px">
+      <button class="run-btn" id="stressStartBtn" onclick="startStress()">▶ 開始壓測</button>
+      <button class="run-btn" id="stressStopBtn" onclick="stopStress()" disabled>■ 停止壓測</button>
+      <span class="run-count" id="stressStatus">尚未執行</span>
+    </div>
+    <div class="cards" style="margin-bottom:16px">
+      <div class="card lim">
+        <div class="card-hd">
+          <div><div class="card-name">CPU Limited</div></div>
+          <div class="badge" id="stressLimBadge" style="color:var(--muted)">待機中</div>
+        </div>
+        <div class="metrics">
+          <div class="metric"><div class="m-label">剩餘時間</div><div class="m-value ph" id="stressLimRemain" style="font-size:40px">—</div><div class="m-unit">秒</div></div>
+        </div>
+      </div>
+      <div class="card unlim">
+        <div class="card-hd">
+          <div><div class="card-name">CPU Unlimited</div></div>
+          <div class="badge" id="stressUnlimBadge" style="color:var(--muted)">待機中</div>
+        </div>
+        <div class="metrics">
+          <div class="metric"><div class="m-label">剩餘時間</div><div class="m-value ph" id="stressUnlimRemain" style="font-size:40px">—</div><div class="m-unit">秒</div></div>
+        </div>
+      </div>
+    </div>
+    <div style="padding:18px 22px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-family:var(--mono)">
+      <div style="color:var(--accent);font-size:17px;margin-bottom:10px;letter-spacing:.05em">💡 壓測進行中可至 Prometheus 查詢以下 PromQL 觀察 throttle 比率：</div>
+      <div class="stress-promql">sum(rate(container_cpu_cfs_throttled_periods_total{
+  container=~"worker-.*", namespace="cpu-bench"
+}[1m])) by (pod)
+/
+sum(rate(container_cpu_cfs_periods_total{
+  container=~"worker-.*", namespace="cpu-bench"
+}[1m])) by (pod)</div>
+    </div>
   </section>
 
   <section>
@@ -412,6 +470,79 @@ function setBar(limId,unlimId,spdId,limVal,unlimVal,isTotal=false){
   updateSpdup(spdId, limVal/unlimVal, isTotal);
 }
 
+let stressDur  = 60;
+let stressPoller = null;
+
+function setStressDur(v, el) {
+  stressDur = v;
+  document.querySelectorAll('#stressDurBtns .numa-size-btn').forEach(b => b.classList.remove('numa-size-active'));
+  el.classList.add('numa-size-active');
+}
+
+async function startStress() {
+  document.getElementById('stressStartBtn').disabled = true;
+  document.getElementById('stressStopBtn').disabled  = false;
+  document.getElementById('stressStatus').textContent = '壓測中...';
+  try {
+    await fetch('/api/stress/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({duration_seconds: stressDur, workers: 1, cpu_load_percent: 50})
+    });
+    log(`持續性壓測啟動 — 時長：${stressDur}s，強度：50%`);
+    stressPoller = setInterval(pollStressStatus, 1000);
+  } catch(e) {
+    log('STRESS START ERROR: ' + e.message);
+    document.getElementById('stressStartBtn').disabled = false;
+    document.getElementById('stressStopBtn').disabled  = true;
+    document.getElementById('stressStatus').textContent = '錯誤';
+  }
+}
+
+async function stopStress() {
+  clearInterval(stressPoller);
+  stressPoller = null;
+  try {
+    await fetch('/api/stress/stop', {method: 'POST'});
+    log('持續性壓測手動停止');
+  } catch(e) { log('STRESS STOP ERROR: ' + e.message); }
+  resetStressUI();
+  document.getElementById('stressStatus').textContent = '已停止';
+}
+
+async function pollStressStatus() {
+  try {
+    const res = await fetch('/api/stress/status');
+    const d   = await res.json();
+    updateStressCard('stressLim',   d.limited);
+    updateStressCard('stressUnlim', d.unlimited);
+    if (!d.limited?.running && !d.unlimited?.running) {
+      clearInterval(stressPoller);
+      stressPoller = null;
+      resetStressUI();
+      document.getElementById('stressStatus').textContent = '完成';
+      log('持續性壓測結束');
+    }
+  } catch(e) { /* ignore transient poll errors */ }
+}
+
+function updateStressCard(pfx, d) {
+  if (!d) return;
+  const running = d.running;
+  const badge   = document.getElementById(pfx + 'Badge');
+  badge.textContent       = running ? `壓測中 ${d.cpu_load_percent||50}%` : '待機中';
+  badge.style.color       = running ? 'var(--unlim)' : 'var(--muted)';
+  badge.style.borderColor = running ? 'var(--unlim)' : '';
+  const remainEl = document.getElementById(pfx + 'Remain');
+  remainEl.textContent = running ? Math.round(d.remaining_seconds) : '—';
+  remainEl.classList.toggle('ph', !running);
+}
+
+function resetStressUI() {
+  document.getElementById('stressStartBtn').disabled = false;
+  document.getElementById('stressStopBtn').disabled  = true;
+}
+
 async function runThreadBench(){
   document.getElementById('threadBtn').disabled=true;
   document.getElementById('threadStatus').textContent='執行中...';
@@ -439,8 +570,8 @@ async function runThreadBench(){
     const ins=document.getElementById('threadInsight');
     ins.style.display='block';
     ins.innerHTML=
-      `● CPU Limited（<span style="color:var(--lim)">${fmtCpuLimit(L)}</span>）— ${workers} 條執行緒效益：<span style="color:var(--lim)">${fmtSpeedup(L.speedup)}</span>（${limDesc(L.speedup)}）<br>`+
-      `● CPU Unlimited（<span style="color:var(--unlim)">${fmtCpuLimit(U)}</span>）— ${workers} 條執行緒效益：<span style="color:var(--unlim)">${fmtSpeedup(U.speedup)}</span>（可實際利用多核心）<br>`+
+      `● CPU Limited（<span style="color:var(--lim)">${fmtCpuLimit(L)}</span>）— ${workers} 條執行緒效益：<span style="color:var(--lim)">${fmtSpeedup(L.speedup)}</span><br>`+
+      `● CPU Unlimited（<span style="color:var(--unlim)">${fmtCpuLimit(U)}</span>）— ${workers} 條執行緒效益：<span style="color:var(--unlim)">${fmtSpeedup(U.speedup)}</span><br>`+
       `● 結論：在 CPU Limited container 中，增加執行緒數無法提升效能，多核心優勢被 throttle 完全抵消。`;
     document.getElementById('threadStatus').textContent='完成';
     log(`多執行緒 — 受限（${fmtCpuLimit(L)}）：1條=${L.single_ms}ms / ${workers}條=${L.multi_ms}ms（${fmtSpeedup(L.speedup)}）| 無限制：1條=${U.single_ms}ms / ${workers}條=${U.multi_ms}ms（${fmtSpeedup(U.speedup)}）`);

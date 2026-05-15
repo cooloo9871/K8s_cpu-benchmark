@@ -84,10 +84,65 @@ class Handler(SimpleHTTPRequestHandler):
             run_numa(LIMITED_URL,   "limited",   "CPU Limited")
             run_numa(UNLIMITED_URL, "unlimited", "CPU Unlimited")
             self.send_json(200, results)
+        elif self.path == "/api/stress/status":
+            results = {}
+            def run_stress_status(url, key):
+                try:
+                    with urllib.request.urlopen(f"{url}/stress/status", timeout=10) as r:
+                        results[key] = json.loads(r.read())
+                except Exception as e:
+                    results[key] = {"error": str(e)}
+            t1 = threading.Thread(target=run_stress_status, args=(LIMITED_URL,   "limited"))
+            t2 = threading.Thread(target=run_stress_status, args=(UNLIMITED_URL, "unlimited"))
+            t1.start(); t2.start()
+            t1.join();  t2.join()
+            self.send_json(200, results)
         elif self.path == "/api/health":
             self.send_json(200, {"status": "ok"})
         else:
             super().do_GET()
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body   = self.rfile.read(length) if length > 0 else b"{}"
+
+        if self.path == "/api/stress/start":
+            results = {}
+            def run_stress_start(url, key):
+                try:
+                    req = urllib.request.Request(
+                        f"{url}/stress/start", data=body,
+                        headers={"Content-Type": "application/json"}, method="POST")
+                    with urllib.request.urlopen(req, timeout=10) as r:
+                        results[key] = json.loads(r.read())
+                except Exception as e:
+                    results[key] = {"error": str(e)}
+            t1 = threading.Thread(target=run_stress_start, args=(LIMITED_URL,   "limited"))
+            t2 = threading.Thread(target=run_stress_start, args=(UNLIMITED_URL, "unlimited"))
+            t1.start(); t2.start()
+            t1.join();  t2.join()
+            self.send_json(200, results)
+
+        elif self.path == "/api/stress/stop":
+            results = {}
+            def run_stress_stop(url, key):
+                try:
+                    req = urllib.request.Request(
+                        f"{url}/stress/stop", data=b"{}",
+                        headers={"Content-Type": "application/json"}, method="POST")
+                    with urllib.request.urlopen(req, timeout=10) as r:
+                        results[key] = json.loads(r.read())
+                except Exception as e:
+                    results[key] = {"error": str(e)}
+            t1 = threading.Thread(target=run_stress_stop, args=(LIMITED_URL,   "limited"))
+            t2 = threading.Thread(target=run_stress_stop, args=(UNLIMITED_URL, "unlimited"))
+            t1.start(); t2.start()
+            t1.join();  t2.join()
+            self.send_json(200, results)
+
+        else:
+            self.send_response(404)
+            self.end_headers()
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
