@@ -275,7 +275,7 @@ sum(increase(container_cpu_cfs_periods_total{
   </section>
 
   <section>
-    <div class="sec-title">NUMA 記憶體效能測試 — 連續讀取（頻寬）+ 隨機存取（延遲）</div>
+    <div class="sec-title">NUMA 記憶體效能測試 — 連續讀取（頻寬）</div>
     <div class="run-row" style="margin-bottom:20px">
       <button class="run-btn" id="numaBtn" onclick="runNumaBench()">▶ 執行 NUMA 壓測</button>
       <span class="run-count" id="numaStatus">尚未執行</span>
@@ -288,8 +288,6 @@ sum(increase(container_cpu_cfs_periods_total{
         <div class="metrics">
           <div class="metric"><div class="m-label" style="font-size:14px">本地存取時間</div><div class="m-value ph" id="nl-v1" style="font-size:52px">—</div><div class="m-unit" style="font-size:18px">毫秒</div></div>
           <div class="metric"><div class="m-label" style="font-size:14px">跨 NUMA Node 存取時間</div><div class="m-value ph" id="nl-v2" style="font-size:52px">—</div><div class="m-unit" style="font-size:18px">毫秒</div></div>
-          <div class="metric"><div class="m-label" style="font-size:14px">本地 DRAM 延遲</div><div class="m-value ph" id="nl-lat-l" style="font-size:52px">—</div><div class="m-unit" style="font-size:18px">ns</div></div>
-          <div class="metric"><div class="m-label" style="font-size:14px">跨 Node DRAM 延遲</div><div class="m-value ph" id="nl-lat-r" style="font-size:52px">—</div><div class="m-unit" style="font-size:18px">ns</div></div>
         </div>
         <div class="total-row" style="margin-top:12px">
           <div class="t-label" id="nl-bw-label" style="font-size:15px">記憶體頻寬（本地 / 跨 node）</div>
@@ -303,8 +301,6 @@ sum(increase(container_cpu_cfs_periods_total{
         <div class="metrics">
           <div class="metric"><div class="m-label" style="font-size:14px">本地存取時間</div><div class="m-value ph" id="nu-v1" style="font-size:52px">—</div><div class="m-unit" style="font-size:18px">毫秒</div></div>
           <div class="metric"><div class="m-label" style="font-size:14px">跨 NUMA Node 存取時間</div><div class="m-value ph" id="nu-v2" style="font-size:52px">—</div><div class="m-unit" style="font-size:18px">毫秒</div></div>
-          <div class="metric"><div class="m-label" style="font-size:14px">本地 DRAM 延遲</div><div class="m-value ph" id="nu-lat-l" style="font-size:52px">—</div><div class="m-unit" style="font-size:18px">ns</div></div>
-          <div class="metric"><div class="m-label" style="font-size:14px">跨 Node DRAM 延遲</div><div class="m-value ph" id="nu-lat-r" style="font-size:52px">—</div><div class="m-unit" style="font-size:18px">ns</div></div>
         </div>
         <div class="total-row" style="margin-top:12px">
           <div class="t-label" id="nu-bw-label" style="font-size:15px">記憶體頻寬（本地 / 跨 node）</div>
@@ -601,10 +597,6 @@ function renderNuma(pfx, d) {
     document.getElementById(pfx+'-bw').textContent =
       `${d.bandwidth_single_gbps != null ? d.bandwidth_single_gbps : '—'} / —`;
   }
-  const latL = document.getElementById(pfx+'-lat-l');
-  const latR = document.getElementById(pfx+'-lat-r');
-  if (latL) { latL.textContent = d.local_lat_ns  != null ? d.local_lat_ns  : '—'; latL.classList.remove('ph'); }
-  if (latR) { latR.textContent = d.remote_lat_ns != null ? d.remote_lat_ns : '—'; latR.classList.remove('ph'); }
   [pfx+'-v1', pfx+'-v2'].forEach(id => document.getElementById(id).classList.remove('ph'));
 }
 
@@ -622,16 +614,12 @@ function renderNumaCompare(L, U) {
   const lBwRemote = L.available ? L.bandwidth_remote_gbps : null;
   const uBwRemote = U.available ? U.bandwidth_remote_gbps : null;
   const fmtGBs = v => v != null ? v+' GB/s' : '—';
-  const fmtNs  = v => v != null ? v+' ns'   : '—';
   const fmtX   = v => v != null ? v+'x'     : '—';
 
   const rows = [
     { label: '本地記憶體頻寬',       lVal: fmtGBs(lBwLocal),          uVal: fmtGBs(uBwLocal) },
     { label: '跨 Node 記憶體頻寬',   lVal: fmtGBs(lBwRemote),         uVal: fmtGBs(uBwRemote) },
-    { label: '本地 DRAM 延遲',       lVal: fmtNs(L.local_lat_ns),     uVal: fmtNs(U.local_lat_ns) },
-    { label: '跨 Node DRAM 延遲',    lVal: fmtNs(L.remote_lat_ns),    uVal: fmtNs(U.remote_lat_ns) },
     { label: '頻寬衰減（跨/本地）',  lVal: fmtX(L.available ? L.slowdown   : null), uVal: fmtX(U.available ? U.slowdown   : null) },
-    { label: '延遲倍率（跨/本地）',  lVal: fmtX(L.lat_ratio),         uVal: fmtX(U.lat_ratio) },
   ];
   tbody.innerHTML = rows.map((r,i) =>
     `<tr style="border-bottom:1px solid var(--border);background:${i%2===0?'transparent':'rgba(22,27,34,.5)'}">
@@ -690,19 +678,13 @@ async function runNumaBench() {
         ? `<br>⚠ <span style="color:var(--accent)">affinity 診斷：執行緒未如預期固定在 Node${U.node_a} CPU；libnuma 仍確保記憶體在正確節點，頻寬結果仍有效但可能未完全反映本地 CPU 優勢。</span>` : '';
       const touchNote = U.first_touch_in_node_a === false
         ? `<br>⚠ <span style="color:var(--lim)">libnuma 不可用，記憶體基於 first-touch 分配；若容器缺少 SYS_NICE 導致 sched_setaffinity() 失效，local/remote 標籤可能不準確。</span>` : '';
-      const latLine = U.local_lat_ns != null
-        ? `<br>● 隨機存取延遲（pointer-chase ${U.lat_array_mb||256} MB，破壞 prefetcher）— `+
-          `${U.pod_name||'Unlimited'} 本地：<strong>${U.local_lat_ns} ns</strong>`+
-          (U.remote_lat_ns != null ? `，跨 node：<strong>${U.remote_lat_ns} ns</strong>（<strong style="color:var(--lim)">${U.lat_ratio}x</strong>）` : '')+
-          (L.local_lat_ns != null ? `；${L.pod_name||'Limited'} 本地：<strong>${L.local_lat_ns} ns</strong>` : '')
-        : '';
       ins.innerHTML =
         `● ${L.pod_name||'CPU Limited'}（cpuset [${lCpus}]，單一 NUMA node，<strong>1 執行緒</strong>）→ 本地讀取 ${L.array_mb||2048} MB：${lMs} ms，頻寬 ${lBw} GB/s<br>`+
         `● ${U.pod_name||'CPU Unlimited'}（無 cpuset，跨 Node${U.node_a}+Node${U.node_b}，各 <strong>1 執行緒</strong>）→ 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）vs 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s）`+
         (uSlowdownOk
           ? `，<strong style="color:var(--lim)">跨 node 慢 ${U.slowdown}x</strong>`
           : `，差異不顯著（slowdown=${U.slowdown}x）`)+
-        crossFasterNote + affinityNote + touchNote + latLine +
+        crossFasterNote + affinityNote + touchNote +
         `<br>● 兩側均使用 <strong>1 執行緒</strong>（公平對比，已排除執行緒數差異）。`+
         (uSlowdownOk
           ? ` NUMA 綁定使 ${L.pod_name||'CPU Limited'} 所有記憶體存取集中在本地 DRAM，無跨 QPI 延遲。`
@@ -716,29 +698,19 @@ async function runNumaBench() {
         : `，跨 node 慢 ${U.slowdown}x`;
       const affinityWarnL = L.affinity_ok === false ? ` <span style="color:var(--accent)">⚠ 執行緒未在 Node${L.node_a} CPU 執行</span>` : '';
       const affinityWarnU = U.affinity_ok === false ? ` <span style="color:var(--accent)">⚠ 執行緒未在 Node${U.node_a} CPU 執行</span>` : '';
-      const latLine = (L.local_lat_ns != null || U.local_lat_ns != null)
-        ? `<br>● 延遲（pointer-chase ${L.lat_array_mb||256} MB）— `+
-          `${L.pod_name||'Limited'}：本地 ${L.local_lat_ns!=null?L.local_lat_ns:'—'} ns / 跨 node ${L.remote_lat_ns!=null?L.remote_lat_ns:'—'} ns（${L.lat_ratio!=null?L.lat_ratio+'x':'—'}）`+
-          ` | ${U.pod_name||'Unlimited'}：本地 ${U.local_lat_ns!=null?U.local_lat_ns:'—'} ns / 跨 node ${U.remote_lat_ns!=null?U.remote_lat_ns:'—'} ns（${U.lat_ratio!=null?U.lat_ratio+'x':'—'}）`
-        : '';
       ins.innerHTML =
         `● NUMA ${L.total_numa_nodes} nodes | 各 <strong>1 執行緒</strong> × ${L.array_mb} MB | arr_local（Node${L.node_a} DRAM）、arr_remote（Node${L.node_b} DRAM），CPU 固定在 Node${L.node_a}<br>`+
         `● ${L.pod_name||'CPU Limited'}${affinityWarnL} — 本地 ${L.local_ms} ms（${L.bandwidth_local_gbps} GB/s）→ 跨 node ${L.remote_ms} ms（${L.bandwidth_remote_gbps} GB/s）${lCrossNote}<br>`+
         `● ${U.pod_name||'CPU Unlimited'}${affinityWarnU} — 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）→ 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s）${uCrossNote}`+
-        latLine +
         `<br>● 解法：kubelet 設定 <code>cpuManagerPolicy: static</code> + <code>topologyManagerPolicy: single-numa-node</code>，Pod 的 CPU 與記憶體將綁定在同一 NUMA node。`;
     } else {
-      const latLine = (L.local_lat_ns != null || U.local_lat_ns != null)
-        ? `<br>● 延遲（本地 pointer-chase）— ${L.pod_name||'Limited'}：${L.local_lat_ns!=null?L.local_lat_ns:'—'} ns | ${U.pod_name||'Unlimited'}：${U.local_lat_ns!=null?U.local_lat_ns:'—'} ns`
-        : '';
       ins.innerHTML =
         `● container 內 CPU 只涵蓋單一 NUMA node — 無法展示跨 node 存取差異（兩側均為此情況）<br>`+
         `● 頻寬測試：讀取 ${L.array_mb||2048} MB，可用 CPU：[${(L.allowed_cpus||[]).join(',')||'—'}]`+
-        latLine +
         `<br>● 若要展示 NUMA 效能差異：設定 requests.cpu = limits.cpu（整數）並啟用 K8s CPU Manager (static) + Topology Manager (single-numa-node)`;
     }
     document.getElementById('numaStatus').textContent = '完成';
-    log(`NUMA 壓測完成（2048 MB）— 受限：本地 ${L.local_ms||L.single_ms||'—'}ms 延遲 ${L.local_lat_ns||'—'}ns | 無限制：本地 ${U.local_ms||U.single_ms||'—'}ms 延遲 ${U.local_lat_ns||'—'}ns`);
+    log(`NUMA 壓測完成（2048 MB）— 受限：本地 ${L.local_ms||L.single_ms||'—'}ms | 無限制：本地 ${U.local_ms||U.single_ms||'—'}ms`);
   } catch(e) {
     log('NUMA ERROR: ' + e.message);
     document.getElementById('numaStatus').textContent = '錯誤';

@@ -366,50 +366,6 @@ def _stream_chunk(args):
     cpu = _get_thread_cpu()
     return val, cpu
 
-# ── Latency test helpers ──────────────────────────────────────────────────────
-
-_LAT_STEPS = 100_000  # pointer-chase iterations per latency measurement
-
-def _build_pointer_chain(n):
-    """Random permutation as pointer-chase chain (arr[i] = next index to visit)."""
-    rng = np.random.default_rng()
-    return rng.permutation(n).astype(np.int64)
-
-def _chase_ns(chain, steps):
-    """Sequential pointer chase — each access depends on the previous result,
-    defeating the hardware prefetcher.  Returns (ns_per_step, final_idx)."""
-    idx = 0
-    t = time.perf_counter_ns()
-    for _ in range(steps):
-        idx = int(chain[idx])
-    return (time.perf_counter_ns() - t) / steps, idx
-
-def _lat_worker(args):
-    """Thread target: pin to cpuset, estimate DRAM latency via pointer chasing.
-    Subtracts L1-cache baseline (= pure Python loop overhead) to isolate
-    memory latency.  Returns (dram_latency_ns, dummy_int)."""
-    chain_large, cpuset = args
-    if cpuset:
-        try:
-            os.sched_setaffinity(0, cpuset)
-        except (OSError, PermissionError, AttributeError):
-            pass
-
-    # 256-element chain (2 KB) fits in L1 — measures Python overhead only
-    chain_small = _build_pointer_chain(256)
-
-    steps = _LAT_STEPS
-    # Warm-up: trigger page faults on large chain, prime L1 for small chain
-    _chase_ns(chain_large, min(5_000, len(chain_large)))
-    _chase_ns(chain_small, 30_000)
-
-    large_ns, d1 = _chase_ns(chain_large, steps)
-    # 3× steps for a stable Python-overhead baseline
-    small_ns, d2 = _chase_ns(chain_small, steps * 3)
-
-    # DRAM contribution ≈ large − small (both include identical Python overhead)
-    return round(max(1.0, large_ns - small_ns), 1), d1 ^ d2
-
 def _load_libnuma():
     """Load libnuma.so.1 via ctypes. Returns the library handle or None."""
     try:
@@ -532,13 +488,8 @@ def _bench_numa_impl(array_mb=1024):
 
         # libnuma guarantees memory lands on the target node regardless of
         # which CPU triggers the page fault — eliminates first-touch unreliability.
-        lat_mb = 64
-        lat_n  = (lat_mb * 1024 * 1024) // 8
-
-        arr_local,        free_local      = _alloc_on_node(n,     node_ids[0])
-        arr_remote,       free_remote     = _alloc_on_node(n,     node_ids[1])
-        lat_chain_local,  free_lat_local  = _alloc_on_node(lat_n, node_ids[0], dtype=np.int64)
-        lat_chain_remote, free_lat_remote = _alloc_on_node(lat_n, node_ids[1], dtype=np.int64)
+        arr_local,  free_local  = _alloc_on_node(n, node_ids[0])
+        arr_remote, free_remote = _alloc_on_node(n, node_ids[1])
         evict_n   = (64 * 1024 * 1024) // 8
         evict_buf = np.empty(evict_n, dtype=np.float64)
         chunks_local = chunks_remote = None
@@ -551,11 +502,6 @@ def _bench_numa_impl(array_mb=1024):
 
             # Initialize latency chains as random permutations in-place.
             # Pages stay on the assigned node because the buffer is already faulted.
-            lat_chain_local[:]  = np.arange(lat_n, dtype=np.int64)
-            np.random.default_rng().shuffle(lat_chain_local)
-            lat_chain_remote[:] = np.arange(lat_n, dtype=np.int64)
-            np.random.default_rng().shuffle(lat_chain_remote)
-
             chunks_local  = np.array_split(arr_local,  workers)
             chunks_remote = np.array_split(arr_remote, workers)
 
@@ -594,10 +540,6 @@ def _bench_numa_impl(array_mb=1024):
                 actual_local_cpus  = sorted(local_cpus_seen)
                 actual_remote_cpus = sorted(remote_cpus_seen)
 
-                # Latency: both chains measured from node_a CPU — only memory location differs
-                local_lat_ns,  _ = ex.submit(_lat_worker, (lat_chain_local,  {cpus_a[0]})).result()
-                remote_lat_ns, _ = ex.submit(_lat_worker, (lat_chain_remote, {cpus_a[0]})).result()
-                lat_ratio = round(remote_lat_ns / local_lat_ns, 2) if local_lat_ns > 0 else 0
 
             # affinity_ok: all threads ran on node_a CPUs (both passes use cpus_a)
             cpus_a_set  = set(cpus_a)
@@ -636,10 +578,6 @@ def _bench_numa_impl(array_mb=1024):
                 "slowdown": slowdown,
                 "bandwidth_local_gbps": bw_local,
                 "bandwidth_remote_gbps": bw_remote,
-                "local_lat_ns": local_lat_ns,
-                "remote_lat_ns": remote_lat_ns,
-                "lat_ratio": lat_ratio,
-                "lat_array_mb": lat_mb,
                 "allowed_cpus": allowed,
                 "cpuset_active": cpuset_active,
                 "pod_name": POD_NAME,
@@ -648,11 +586,9 @@ def _bench_numa_impl(array_mb=1024):
                 "timestamp": datetime.utcnow().isoformat()
             })
         finally:
-            chunks_local = chunks_remote = None   # drop sub-array refs before freeing
+            chunks_local = chunks_remote = None
             del arr_local, arr_remote
-            del lat_chain_local, lat_chain_remote
-            free_local();     free_remote()
-            free_lat_local(); free_lat_remote()
+            free_local(); free_remote()
         return response
 
     # ── Single-NUMA fallback: bandwidth scaling (1 thread vs N threads) ───────
@@ -681,13 +617,6 @@ def _bench_numa_impl(array_mb=1024):
         bw_single = round(array_mb / 1024 / (single_ms / 1000), 2) if single_ms > 0 else 0
         bw_multi  = round(array_mb / 1024 / (multi_ms  / 1000), 2) if multi_ms  > 0 else 0
 
-        # Latency test (single node — local only, no cross-node measurement)
-        lat_mb = 64
-        lat_n  = (lat_mb * 1024 * 1024) // 8
-        lat_chain = np.arange(lat_n, dtype=np.int64)
-        np.random.default_rng().shuffle(lat_chain)
-        local_lat_ns, _ = _lat_worker((lat_chain, None))
-
         return jsonify({
             "available": False,
             "mode": "single_numa",
@@ -701,10 +630,6 @@ def _bench_numa_impl(array_mb=1024):
             "multi_ms": multi_ms,
             "bandwidth_single_gbps": bw_single,
             "bandwidth_multi_gbps": bw_multi,
-            "local_lat_ns": local_lat_ns,
-            "remote_lat_ns": None,
-            "lat_ratio": None,
-            "lat_array_mb": lat_mb,
             "pod_name": POD_NAME,
             "has_cpu_limit": HAS_LIMIT,
             "cpu_limit": get_cpu_limit_str(),
