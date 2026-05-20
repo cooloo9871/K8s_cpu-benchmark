@@ -34,18 +34,18 @@ K8s_cpu-benchmark/
                 │  worker-limited      worker-unlimited     │
                 │  :8080               :8080               │
                 │  cpu limit=100m      cpu limit=無         │
-                │  mem limit=5Gi       mem limit=5Gi        │
-                │  Node A              Node B（不同節點）    │
+                │  mem limit=5Gi       mem req=512Mi        │
+                │  ── 同一節點（podAffinity）──              │
                 └──────────────────────────────────────────┘
 ```
 
-| 元件 | Image | Port | CPU 設定 |
-|------|-------|------|----------|
-| worker-limited | `quay.io/cooloo9871/cpu-bench-worker:latest` | 8080 | requests=100m, limits=100m |
-| worker-unlimited | `quay.io/cooloo9871/cpu-bench-worker:latest` | 8080 | requests=100m, 無 limits |
-| dashboard | `quay.io/cooloo9871/cpu-bench-dashboard:latest` | 3000 (NodePort 30080) | requests=50m, limits=500m |
+| 元件 | Image | Port | CPU 設定 | 記憶體設定 |
+|------|-------|------|----------|-----------|
+| worker-limited | `quay.io/cooloo9871/cpu-bench-worker:latest` | 8080 | requests=100m, limits=100m | requests=limits=5Gi |
+| worker-unlimited | `quay.io/cooloo9871/cpu-bench-worker:latest` | 8080 | requests=100m, 無 limits | requests=512Mi，無 limits |
+| dashboard | `quay.io/cooloo9871/cpu-bench-dashboard:latest` | 3000 (NodePort 30080) | requests=50m, limits=500m | requests=128Mi, limits=256Mi |
 
-兩個 worker 使用 `podAntiAffinity`，強制排程在不同節點。
+兩個 worker 使用 `podAffinity`，強制排程在**相同節點**（便於在相同硬體環境下純粹對比 CPU throttle 差異）。
 
 ---
 
@@ -147,9 +147,9 @@ libnuma 使用 `mbind(MPOL_BIND)` 策略，無論哪顆 CPU 觸發 page fault，
 
 | 端點 | 方法 | 說明 |
 |------|------|------|
-| `/api/bench` | GET | 同時對兩個 worker 執行 `/bench/all`（並行）|
-| `/api/thread_bench` | GET | 同時對兩個 worker 執行 `/bench/threads`（並行）|
-| `/api/numa_bench?size_mb=2048` | GET | 依序對兩個 worker 執行 `/bench/numa`（Limited 先，避免頻寬干擾）|
+| `/api/bench` | GET | 依序對兩個 worker 執行 `/bench/all`（Unlimited 先，Limited 後）|
+| `/api/thread_bench` | GET | 依序對兩個 worker 執行 `/bench/threads`（Unlimited 先，Limited 後）|
+| `/api/numa_bench?size_mb=2048` | GET | 依序對兩個 worker 執行 `/bench/numa`（Unlimited 先，Limited 後）|
 | `/api/stress/start` | POST | 同時對兩個 worker 啟動壓測（並行）|
 | `/api/stress/stop` | POST | 同時對兩個 worker 停止壓測（並行）|
 | `/api/stress/status` | GET | 同時查詢兩個 worker 的壓測狀態（並行）|
@@ -197,7 +197,7 @@ NUMA 測試使用固定 2048 MB 雙陣列：
 | 其他 overhead | ~200 MB |
 | **峰值合計** | **≈ 4.4 GiB** |
 
-兩個 worker Pod 的記憶體 limit 均設為 `5Gi`。
+worker-limited 的記憶體 requests 與 limits 均設為 `5Gi`；worker-unlimited 只設 requests=`512Mi`，無 limits（NUMA 測試時峰值可達 4.4 GiB，依賴節點可用記憶體）。
 
 ---
 
