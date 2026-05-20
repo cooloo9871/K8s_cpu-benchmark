@@ -678,9 +678,14 @@ async function runNumaBench() {
         ? `<br>⚠ <span style="color:var(--accent)">affinity 診斷：執行緒未如預期固定在 Node${U.node_a} CPU；libnuma 仍確保記憶體在正確節點，頻寬結果仍有效但可能未完全反映本地 CPU 優勢。</span>` : '';
       const touchNote = U.first_touch_in_node_a === false
         ? `<br>⚠ <span style="color:var(--lim)">libnuma 不可用，記憶體基於 first-touch 分配；若容器缺少 SYS_NICE 導致 sched_setaffinity() 失效，local/remote 標籤可能不準確。</span>` : '';
+      const lCopyMb = L.copy_size_mb || Math.round((L.array_mb||2048)/2);
+      const uCopyMb = U.copy_size_mb || Math.round((U.array_mb||2048)/2);
       ins.innerHTML =
-        `● ${L.pod_name||'CPU Limited'}（cpuset [${lCpus}]，單一 NUMA node，<strong>1 執行緒</strong>）→ 本地讀取 ${L.array_mb||2048} MB：${lMs} ms，頻寬 ${lBw} GB/s<br>`+
-        `● ${U.pod_name||'CPU Unlimited'}（無 cpuset，跨 Node${U.node_a}+Node${U.node_b}，各 <strong>1 執行緒</strong>）→ 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）vs 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s）`+
+        `● 測量方式：<strong>複製頻寬（mbw DUMB 等效）</strong> — src 和 dst 均在同一 NUMA node，CPU 位置為變數`+
+        `<br>&nbsp;&nbsp;本地：CPU on node_a，np.copyto(dst_local, src_local) ≈ <code>numactl --cpunodebind=a --membind=a mbw</code>`+
+        `<br>&nbsp;&nbsp;遠端：CPU on node_a，np.copyto(dst_remote, src_remote) ≈ <code>numactl --cpunodebind=a --membind=b mbw</code>`+
+        `<br>● ${L.pod_name||'CPU Limited'}（cpuset [${lCpus}]，單一 NUMA node，<strong>1 執行緒</strong>）→ 本地複製 ${lCopyMb} MB：${lMs} ms，頻寬 ${lBw} GB/s<br>`+
+        `● ${U.pod_name||'CPU Unlimited'}（無 cpuset，跨 Node${U.node_a}+Node${U.node_b}，各 <strong>1 執行緒</strong>，複製 ${uCopyMb} MB）→ 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）vs 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s）`+
         (uSlowdownOk
           ? `，<strong style="color:var(--lim)">跨 node 慢 ${U.slowdown}x</strong>`
           : `，差異不顯著（slowdown=${U.slowdown}x）`)+
@@ -698,9 +703,13 @@ async function runNumaBench() {
         : `，跨 node 慢 ${U.slowdown}x`;
       const affinityWarnL = L.affinity_ok === false ? ` <span style="color:var(--accent)">⚠ 執行緒未在 Node${L.node_a} CPU 執行</span>` : '';
       const affinityWarnU = U.affinity_ok === false ? ` <span style="color:var(--accent)">⚠ 執行緒未在 Node${U.node_a} CPU 執行</span>` : '';
+      const lcMb = L.copy_size_mb || Math.round(L.array_mb/2);
+      const ucMb = U.copy_size_mb || Math.round(U.array_mb/2);
       ins.innerHTML =
-        `● NUMA ${L.total_numa_nodes} nodes | 各 <strong>1 執行緒</strong> × ${L.array_mb} MB | arr_local（Node${L.node_a} DRAM）、arr_remote（Node${L.node_b} DRAM），CPU 固定在 Node${L.node_a}<br>`+
-        `● ${L.pod_name||'CPU Limited'}${affinityWarnL} — 本地 ${L.local_ms} ms（${L.bandwidth_local_gbps} GB/s）→ 跨 node ${L.remote_ms} ms（${L.bandwidth_remote_gbps} GB/s）${lCrossNote}<br>`+
+        `● 測量方式：<strong>複製頻寬（mbw DUMB 等效）</strong> — 各 node 的陣列對半切（src / dst 均在同一 node），1 執行緒複製 ${lcMb} MB`+
+        `<br>&nbsp;&nbsp;本地：CPU on Node${L.node_a} → copy within arr_local（Node${L.node_a}）≈ <code>numactl --cpunodebind=${L.node_a} --membind=${L.node_a} mbw ${lcMb}</code>`+
+        `<br>&nbsp;&nbsp;遠端：CPU on Node${L.node_a} → copy within arr_remote（Node${L.node_b}）≈ <code>numactl --cpunodebind=${L.node_a} --membind=${L.node_b} mbw ${lcMb}</code>`+
+        `<br>● ${L.pod_name||'CPU Limited'}${affinityWarnL} — 本地 ${L.local_ms} ms（${L.bandwidth_local_gbps} GB/s）→ 跨 node ${L.remote_ms} ms（${L.bandwidth_remote_gbps} GB/s）${lCrossNote}<br>`+
         `● ${U.pod_name||'CPU Unlimited'}${affinityWarnU} — 本地 ${U.local_ms} ms（${U.bandwidth_local_gbps} GB/s）→ 跨 node ${U.remote_ms} ms（${U.bandwidth_remote_gbps} GB/s）${uCrossNote}`+
         `<br>● 解法：kubelet 設定 <code>cpuManagerPolicy: static</code> + <code>topologyManagerPolicy: single-numa-node</code>，Pod 的 CPU 與記憶體將綁定在同一 NUMA node。`;
     } else {
