@@ -13,6 +13,7 @@ from flask import Flask, jsonify, request
 from datetime import datetime
 from pathlib import Path
 import ctypes
+import gc
 
 app = Flask(__name__)
 
@@ -621,7 +622,9 @@ def _bench_numa_impl(array_mb=1024):
             chunks_remote_src = chunks_remote_dst = None
             src_local = dst_local = src_remote = dst_remote = None
             del arr_local, arr_remote
-            free_local(); free_remote()
+            gc.collect()
+            free_local()
+            free_remote()
         return response
 
     # ── Single-NUMA fallback: bandwidth scaling (1 thread vs N threads) ───────
@@ -677,9 +680,9 @@ def _bench_numa_impl(array_mb=1024):
         })
 
 # ── Continuous stress test ────────────────────────────────────────────────────
-_stress_state = {"running": False, "started_at": 0.0, "duration": 0, "workers": 0, "cpu_load_percent": 50}
+_stress_state = {"running": False, "started_at": 0.0, "duration": 0, "workers": 0, "cpu_load_percent": 50, "stop_event": threading.Event()}
 _stress_lock  = threading.Lock()
-_stress_stop  = threading.Event()
+_supervisor_thread = None
 
 def _stress_worker_loop(stop_event, load_pct):
     """Burn CPU at load_pct% duty cycle per 20ms cycle: burn then sleep."""
@@ -695,15 +698,15 @@ def _stress_worker_loop(stop_event, load_pct):
         if rest > 0.001:
             time.sleep(rest)
 
-def _stress_supervisor(duration, n_workers, load_pct):
+def _stress_supervisor(stop_event, duration, n_workers, load_pct):
     threads = [
-        threading.Thread(target=_stress_worker_loop, args=(_stress_stop, load_pct), daemon=True)
+        threading.Thread(target=_stress_worker_loop, args=(stop_event, load_pct), daemon=True)
         for _ in range(n_workers)
     ]
     for t in threads:
         t.start()
-    _stress_stop.wait(timeout=duration)
-    _stress_stop.set()
+    stop_event.wait(timeout=duration)
+    stop_event.set()
     for t in threads:
         t.join(timeout=2)
     with _stress_lock:
@@ -711,6 +714,11 @@ def _stress_supervisor(duration, n_workers, load_pct):
 
 @app.route("/stress/start", methods=["POST"])
 def stress_start():
+    global _supervisor_thread
+    # Join old supervisor outside the lock to avoid deadlock; ensures leftover
+    # worker threads from a previous run are fully stopped before starting new ones.
+    if _supervisor_thread and _supervisor_thread.is_alive():
+        _supervisor_thread.join(timeout=5)
     with _stress_lock:
         if _stress_state["running"]:
             return jsonify({"status": "already_running", "error": "stress test already in progress"}), 409
@@ -718,15 +726,18 @@ def stress_start():
         duration  = min(max(1, int(data.get("duration_seconds", 60))), 600)
         n_workers = max(1, int(data.get("workers", 1)))
         load_pct  = min(max(10, int(data.get("cpu_load_percent", 50))), 90)
-        _stress_stop.clear()
+        new_stop = threading.Event()
         _stress_state.update({
             "running":          True,
             "started_at":       time.time(),
             "duration":         duration,
             "workers":          n_workers,
             "cpu_load_percent": load_pct,
+            "stop_event":       new_stop,
         })
-    threading.Thread(target=_stress_supervisor, args=(duration, n_workers, load_pct), daemon=True).start()
+    t = threading.Thread(target=_stress_supervisor, args=(new_stop, duration, n_workers, load_pct), daemon=True)
+    _supervisor_thread = t
+    t.start()
     return jsonify({
         "status":           "started",
         "duration":         duration,
@@ -739,24 +750,28 @@ def stress_start():
 @app.route("/stress/stop", methods=["POST"])
 def stress_stop():
     with _stress_lock:
-        _stress_stop.set()
+        _stress_state["stop_event"].set()
         _stress_state["running"] = False
     return jsonify({"status": "stopped", "pod_name": POD_NAME})
 
 @app.route("/stress/status")
 def stress_status():
     with _stress_lock:
-        running   = _stress_state["running"]
-        elapsed   = round(time.time() - _stress_state["started_at"], 1) if running else 0
-        remaining = max(0.0, round(_stress_state["duration"] - elapsed, 1)) if running else 0
-        return jsonify({
-            "running":           running,
-            "elapsed_seconds":   elapsed,
-            "remaining_seconds": remaining,
-            "workers":           _stress_state["workers"] if running else 0,
-            "cpu_load_percent":  _stress_state["cpu_load_percent"] if running else 0,
-            "pod_name":          POD_NAME,
-        })
+        running    = _stress_state["running"]
+        started_at = _stress_state["started_at"]
+        duration   = _stress_state["duration"]
+        workers    = _stress_state["workers"]
+        cpu_load   = _stress_state["cpu_load_percent"]
+    elapsed   = round(time.time() - started_at, 1) if running else 0
+    remaining = max(0.0, round(duration - elapsed, 1)) if running else 0
+    return jsonify({
+        "running":           running,
+        "elapsed_seconds":   elapsed,
+        "remaining_seconds": remaining,
+        "workers":           workers if running else 0,
+        "cpu_load_percent":  cpu_load if running else 0,
+        "pod_name":          POD_NAME,
+    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, threaded=True)

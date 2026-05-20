@@ -340,7 +340,7 @@ sum(increase(container_cpu_cfs_periods_total{
 </div>
 
 <script>
-let runN=0,histL=[],histU=[],histLbls=[];
+let runN=0,histL=[],histU=[],histLbls=[],pollErrCount=0;
 
 // Returns badge label for a worker response (non-NUMA sections only):
 //   cpu_limit_cores set → "limits.cpu: N"  (numeric, from cgroup path discovery)
@@ -349,7 +349,7 @@ let runN=0,histL=[],histU=[],histLbls=[];
 function fmtCpuLimit(d) {
   if (!d) return '未設定 CPU Limit';
   // primary: numeric cores from get_cpu_limit() (cgroup path-aware)
-  if (d.cpu_limit_cores != null) {
+  if (d.cpu_limit_cores != null && d.cpu_limit_cores > 0) {
     const c = d.cpu_limit_cores;
     // < 1 core → show millicores (e.g. 0.1 → "100m"); ≥ 1 core → show integer
     return c >= 1 ? `limits.cpu: ${c}` : `limits.cpu: ${Math.round(c * 1000)}m`;
@@ -463,6 +463,7 @@ function updateSpdup(id, ratio, isTotal=false){
 
 function setBar(limId,unlimId,spdId,limVal,unlimVal,isTotal=false){
   const mx=Math.max(limVal,unlimVal);
+  if(!mx){return;}
   document.getElementById(limId).style.width=Math.round(limVal/mx*100)+'%';
   document.getElementById(limId).textContent=limVal+' ms';
   document.getElementById(unlimId).style.width=Math.round(unlimVal/mx*100)+'%';
@@ -484,11 +485,20 @@ async function startStress() {
   document.getElementById('stressStopBtn').disabled  = false;
   document.getElementById('stressStatus').textContent = '壓測中...';
   try {
-    await fetch('/api/stress/start', {
+    const res = await fetch('/api/stress/start', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({duration_seconds: stressDur, workers: 1, cpu_load_percent: 50})
     });
+    const data = await res.json();
+    if (data.limited?.error || data.unlimited?.error) {
+      const err = data.limited?.error || data.unlimited?.error;
+      log('STRESS START 失敗: ' + err);
+      document.getElementById('stressStartBtn').disabled = false;
+      document.getElementById('stressStopBtn').disabled  = true;
+      document.getElementById('stressStatus').textContent = '錯誤';
+      return;
+    }
     log(`持續性壓測啟動 — 時長：${stressDur}s，強度：50%`);
     stressPoller = setInterval(pollStressStatus, 1000);
   } catch(e) {
@@ -514,16 +524,27 @@ async function pollStressStatus() {
   try {
     const res = await fetch('/api/stress/status');
     const d   = await res.json();
+    pollErrCount = 0;
     updateStressCard('stressLim',   d.limited);
     updateStressCard('stressUnlim', d.unlimited);
-    if (d.limited?.running === false && d.unlimited?.running === false) {
+    const limDone   = d.limited   && !d.limited.error   && d.limited.running   === false;
+    const unlimDone = d.unlimited && !d.unlimited.error && d.unlimited.running === false;
+    if (limDone && unlimDone) {
       clearInterval(stressPoller);
       stressPoller = null;
       resetStressUI();
       document.getElementById('stressStatus').textContent = '完成';
       log('持續性壓測結束');
     }
-  } catch(e) { /* ignore transient poll errors */ }
+  } catch(e) {
+    if (++pollErrCount > 10) {
+      clearInterval(stressPoller);
+      stressPoller = null;
+      resetStressUI();
+      document.getElementById('stressStatus').textContent = '輪詢失敗';
+      log('STRESS 輪詢連續失敗，已中止');
+    }
+  }
 }
 
 function updateStressCard(pfx, d) {
@@ -742,6 +763,7 @@ async function runBench(){
     runN++;
     document.getElementById('runCount').textContent='第 '+runN+' 次';
     const lb=L.benchmarks,ub=U.benchmarks;
+    if(!lb?.fibonacci || !ub?.fibonacci){log('ERROR: benchmarks 資料格式異常 — '+JSON.stringify(L).slice(0,100));return;}
     document.getElementById('lpod').textContent=L.pod_name||'Pod A';
     document.getElementById('upod').textContent=U.pod_name||'Pod B';
     updateBadges(L,U);

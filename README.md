@@ -13,7 +13,7 @@ K8s_cpu-benchmark/
 │   └── Dockerfile      # python:3.11-slim + libnuma1
 ├── dashboard/
 │   ├── server.py       # Python HTTP server（port 3000）
-│   ├── index.html      # 前端 UI
+│   ├── index.html      # 前端 UI（由 Dockerfile 複製到容器 /app/public/）
 │   └── Dockerfile      # python:3.11-slim
 ├── k8s/
 │   └── deploy.yaml     # Namespace + 2 Workers + Dashboard
@@ -147,13 +147,13 @@ libnuma 使用 `mbind(MPOL_BIND)` 策略，無論哪顆 CPU 觸發 page fault，
 
 | 端點 | 方法 | 說明 |
 |------|------|------|
-| `/api/bench` | GET | 依序對兩個 worker 執行 `/bench/all`（Unlimited 先，Limited 後）|
-| `/api/thread_bench` | GET | 依序對兩個 worker 執行 `/bench/threads`（Unlimited 先，Limited 後）|
-| `/api/numa_bench?size_mb=2048` | GET | 依序對兩個 worker 執行 `/bench/numa`（Unlimited 先，Limited 後）|
-| `/api/stress/start` | POST | 同時對兩個 worker 啟動壓測（並行）|
-| `/api/stress/stop` | POST | 同時對兩個 worker 停止壓測（並行）|
-| `/api/stress/status` | GET | 同時查詢兩個 worker 的壓測狀態（並行）|
-| `/api/worker_info` | GET | 同時查詢兩個 worker 的 `/info`（並行）|
+| `/api/bench` | GET | 並行對兩個 worker 執行 `/bench/all` |
+| `/api/thread_bench` | GET | 並行對兩個 worker 執行 `/bench/threads` |
+| `/api/numa_bench?size_mb=2048` | GET | 並行對兩個 worker 執行 `/bench/numa` |
+| `/api/stress/start` | POST | 並行對兩個 worker 啟動壓測 |
+| `/api/stress/stop` | POST | 並行對兩個 worker 停止壓測 |
+| `/api/stress/status` | GET | 並行查詢兩個 worker 的壓測狀態 |
+| `/api/worker_info` | GET | 並行查詢兩個 worker 的 `/info` |
 | `/api/health` | GET | Dashboard 自身健康檢查 |
 
 ---
