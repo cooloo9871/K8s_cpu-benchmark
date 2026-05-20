@@ -366,6 +366,20 @@ def _stream_chunk(args):
     cpu = _get_thread_cpu()
     return val, cpu
 
+def _copy_chunk(args):
+    """Pin thread to cpuset, copy src to dst (releases GIL), record actual CPU.
+    Matches numactl --cpunodebind=X --membind=Y mbw DUMB semantics:
+    both src and dst reside on the same NUMA node, CPU placement is the variable."""
+    src_chunk, dst_chunk, cpuset = args
+    if cpuset:
+        try:
+            os.sched_setaffinity(0, cpuset)
+        except (OSError, PermissionError, AttributeError):
+            pass
+    np.copyto(dst_chunk, src_chunk)
+    cpu = _get_thread_cpu()
+    return 0.0, cpu
+
 def _load_libnuma():
     """Load libnuma.so.1 via ctypes. Returns the library handle or None."""
     try:
@@ -455,15 +469,17 @@ def _bench_numa_impl(array_mb=1024):
 
     n = (array_mb * 1024 * 1024) // 8  # number of float64 elements
 
-    def run_pass(executor, chunks, cpu_list):
-        """One timed pass: pin each thread to its CPU, stream-read its chunk.
+    def run_copy_pass(executor, src_chunks, dst_chunks, cpu_list):
+        """One timed pass: pin each thread to its CPU, copy src to dst (releases GIL).
+        Matches numactl --cpunodebind=X --membind=Y mbw DUMB: both src and dst are on
+        the same NUMA node, so all memory traffic stays on (or crosses to) that node.
         Returns (elapsed_ms, sorted actual CPU set, per-thread CPU list)."""
         task_args = [
-            (chunks[i], {cpu_list[i % len(cpu_list)]})
-            for i in range(len(chunks))
+            (src_chunks[i], dst_chunks[i], {cpu_list[i % len(cpu_list)]})
+            for i in range(len(src_chunks))
         ]
         t = time.perf_counter()
-        results = list(executor.map(_stream_chunk, task_args))
+        results = list(executor.map(_copy_chunk, task_args))
         elapsed_ms = (time.perf_counter() - t) * 1000
         per_thread_cpus = [r[1] for r in results]
         actual_cpus = sorted({c for c in per_thread_cpus if c >= 0})
@@ -492,7 +508,8 @@ def _bench_numa_impl(array_mb=1024):
         arr_remote, free_remote = _alloc_on_node(n, node_ids[1])
         evict_n   = (64 * 1024 * 1024) // 8
         evict_buf = np.empty(evict_n, dtype=np.float64)
-        chunks_local = chunks_remote = None
+        src_local = dst_local = src_remote = dst_remote = None
+        chunks_local_src = chunks_local_dst = chunks_remote_src = chunks_remote_dst = None
         try:
             # Page-fault all arrays to place pages on their assigned NUMA nodes.
             # With libnuma mbind policy this happens regardless of current CPU.
@@ -500,33 +517,42 @@ def _bench_numa_impl(array_mb=1024):
             arr_remote[:] = 1.0
             evict_buf[:]  = 1.0
 
-            # Initialize latency chains as random permutations in-place.
-            # Pages stay on the assigned node because the buffer is already faulted.
-            chunks_local  = np.array_split(arr_local,  workers)
-            chunks_remote = np.array_split(arr_remote, workers)
+            # Split each node's array in half: src = first half, dst = second half.
+            # Local test:  CPU on node_a copies within arr_local  (node_a src → node_a dst)
+            #              ≈ numactl --cpunodebind=a --membind=a mbw DUMB
+            # Remote test: CPU on node_a copies within arr_remote (node_b src → node_b dst)
+            #              ≈ numactl --cpunodebind=a --membind=b mbw DUMB
+            # No extra allocation needed: reuses the same 2048 MB per node.
+            n_half = n // 2
+            src_local  = arr_local[:n_half];  dst_local  = arr_local[n_half:]
+            src_remote = arr_remote[:n_half]; dst_remote = arr_remote[n_half:]
+            chunks_local_src  = np.array_split(src_local,  workers)
+            chunks_local_dst  = np.array_split(dst_local,  workers)
+            chunks_remote_src = np.array_split(src_remote, workers)
+            chunks_remote_dst = np.array_split(dst_remote, workers)
 
             PASSES = 7
             with ThreadPoolExecutor(max_workers=workers) as ex:
-                # Warm-up: both arrays read from node_a CPUs
+                # Warm-up: both node arrays copied with node_a CPUs
                 float(np.sum(evict_buf))
-                run_pass(ex, chunks_local,  cpus_a)
+                run_copy_pass(ex, chunks_local_src,  chunks_local_dst,  cpus_a)
                 float(np.sum(evict_buf))
-                run_pass(ex, chunks_remote, cpus_a)
+                run_copy_pass(ex, chunks_remote_src, chunks_remote_dst, cpus_a)
 
                 local_times, remote_times = [], []
                 local_cpus_seen, remote_cpus_seen = set(), set()
                 local_thr_log, remote_thr_log = [], []
                 for _ in range(PASSES):
-                    # Local: CPU on node_a reads arr_local (node_a memory)
+                    # Local: CPU on node_a copies within arr_local (node_a → node_a)
                     float(np.sum(evict_buf))
-                    t, cpus, thr = run_pass(ex, chunks_local, cpus_a)
+                    t, cpus, thr = run_copy_pass(ex, chunks_local_src, chunks_local_dst, cpus_a)
                     local_times.append(t)
                     local_cpus_seen.update(cpus)
                     local_thr_log.append(thr)
 
-                    # Remote: CPU still on node_a, reads arr_remote (node_b memory)
+                    # Remote: CPU on node_a copies within arr_remote (node_b → node_b)
                     float(np.sum(evict_buf))
-                    t, cpus, thr = run_pass(ex, chunks_remote, cpus_a)
+                    t, cpus, thr = run_copy_pass(ex, chunks_remote_src, chunks_remote_dst, cpus_a)
                     remote_times.append(t)
                     remote_cpus_seen.update(cpus)
                     remote_thr_log.append(thr)
@@ -549,14 +575,19 @@ def _bench_numa_impl(array_mb=1024):
             )
             memory_pinned = _libnuma is not None
 
-            bw_local  = round(array_mb / 1024 / (local_ms  / 1000), 2) if local_ms  > 0 else 0
-            bw_remote = round(array_mb / 1024 / (remote_ms / 1000), 2) if remote_ms > 0 else 0
+            # copy_mb = bytes effectively copied per pass (src half → dst half).
+            # Bandwidth formula matches mbw convention: copy_size / elapsed_time.
+            copy_mb   = array_mb // 2
+            bw_local  = round(copy_mb / 1024 / (local_ms  / 1000), 2) if local_ms  > 0 else 0
+            bw_remote = round(copy_mb / 1024 / (remote_ms / 1000), 2) if remote_ms > 0 else 0
             slowdown  = round(remote_ms / local_ms, 2) if local_ms > 0 else 0
 
             response = jsonify({
                 "available": True,
                 "mode": "cross_numa",
+                "test_method": "copy",
                 "array_mb": array_mb,
+                "copy_size_mb": copy_mb,
                 "workers": workers,
                 "total_numa_nodes": len(numa_map),
                 "node_a": node_ids[0],
@@ -586,7 +617,9 @@ def _bench_numa_impl(array_mb=1024):
                 "timestamp": datetime.utcnow().isoformat()
             })
         finally:
-            chunks_local = chunks_remote = None
+            chunks_local_src = chunks_local_dst = None
+            chunks_remote_src = chunks_remote_dst = None
+            src_local = dst_local = src_remote = dst_remote = None
             del arr_local, arr_remote
             free_local(); free_remote()
         return response
@@ -595,36 +628,43 @@ def _bench_numa_impl(array_mb=1024):
     else:
         workers = max(1, min(4, len(allowed)))
         arr = np.ones(n, dtype=np.float64)
-        float(np.sum(arr))              # warm-up / force allocation
+        n_half  = n // 2
+        src_arr = arr[:n_half]
+        dst_arr = arr[n_half:]
+        np.copyto(dst_arr, src_arr)     # warm-up / force page allocation
 
-        # Single-thread baseline: main thread reads full array
+        # Single-thread baseline: copy src_arr → dst_arr (both on same node)
         t = time.perf_counter()
         for _ in range(3):
-            float(np.sum(arr))
+            np.copyto(dst_arr, src_arr)
         single_ms = round((time.perf_counter() - t) / 3 * 1000, 2)
 
-        # Multi-thread: N threads read split chunks; pool kept alive across runs
-        chunks     = np.array_split(arr, workers)
-        task_args  = [(c, None) for c in chunks]
+        # Multi-thread: N threads copy split chunks; pool kept alive across runs
+        chunks_src = np.array_split(src_arr, workers)
+        chunks_dst = np.array_split(dst_arr, workers)
+        task_args  = [(s, d, None) for s, d in zip(chunks_src, chunks_dst)]
 
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            list(ex.map(_stream_chunk, task_args))  # warm-up, discard
+            list(ex.map(_copy_chunk, task_args))  # warm-up, discard
             t = time.perf_counter()
             for _ in range(3):
-                list(ex.map(_stream_chunk, task_args))
+                list(ex.map(_copy_chunk, task_args))
             multi_ms = round((time.perf_counter() - t) / 3 * 1000, 2)
 
-        bw_single = round(array_mb / 1024 / (single_ms / 1000), 2) if single_ms > 0 else 0
-        bw_multi  = round(array_mb / 1024 / (multi_ms  / 1000), 2) if multi_ms  > 0 else 0
+        copy_mb   = array_mb // 2
+        bw_single = round(copy_mb / 1024 / (single_ms / 1000), 2) if single_ms > 0 else 0
+        bw_multi  = round(copy_mb / 1024 / (multi_ms  / 1000), 2) if multi_ms  > 0 else 0
 
         return jsonify({
             "available": False,
             "mode": "single_numa",
+            "test_method": "copy",
             "reason": "container CPUs only span 1 NUMA node — showing bandwidth scaling instead",
             "total_numa_nodes": len(numa_map),
             "allowed_cpus": allowed,
             "cpuset_active": cpuset_active,
             "array_mb": array_mb,
+            "copy_size_mb": copy_mb,
             "workers": workers,
             "single_ms": single_ms,
             "multi_ms": multi_ms,
